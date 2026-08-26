@@ -227,13 +227,13 @@ export function showCommitEditor(
       localResourceRoots: [mediaUri],
     },
   );
-  const iconPath = vscode.Uri.joinPath(mediaUri, "icon.png");
-  panel.iconPath = iconPath;
+  const brandIconPath = vscode.Uri.joinPath(mediaUri, "icon.png");
+  panel.iconPath = vscode.Uri.joinPath(mediaUri, "icon-small.png");
   const nonce = randomBytes(16).toString("hex");
   panel.webview.html = editorHtml(
     message,
     nonce,
-    panel.webview.asWebviewUri(iconPath).toString(),
+    panel.webview.asWebviewUri(brandIconPath).toString(),
     panel.webview.cspSource,
     provider,
     model,

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Caveman Commit">
+  <path fill="currentColor" d="M49.7 11.8A27.5 27.5 0 1 0 49.7 52.2L42 44.5A16.6 16.6 0 1 1 42 19.5Z"/>
+  <path fill="currentColor" d="M25 29h10v6H25zm29 0h9v6h-9z"/>
+  <path fill="currentColor" fill-rule="evenodd" d="M45 23a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/>
+</svg>
