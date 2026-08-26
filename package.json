@@ -1,0 +1,116 @@
+{
+  "name": "caveman-commit",
+  "displayName": "Caveman Commit",
+  "description": "Gera mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "git",
+    "commit",
+    "codex",
+    "claude",
+    "conventional-commits"
+  ],
+  "activationEvents": [
+    "onCommand:cavemanCommit.generateCommit",
+    "onCommand:cavemanCommit.selectProvider",
+    "onCommand:cavemanCommit.selectModel",
+    "onCommand:cavemanCommit.openSettings",
+    "onStartupFinished"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cavemanCommit.generateCommit",
+        "title": "Caveman Commit: Generate Commit",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "cavemanCommit.selectProvider",
+        "title": "Caveman Commit: Select Provider"
+      },
+      {
+        "command": "cavemanCommit.selectModel",
+        "title": "Caveman Commit: Select Model"
+      },
+      {
+        "command": "cavemanCommit.openSettings",
+        "title": "Caveman Commit: Open Settings"
+      }
+    ],
+    "configuration": {
+      "title": "Caveman Commit",
+      "properties": {
+        "cavemanCommit.provider": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude"
+          ],
+          "default": "codex",
+          "description": "CLI usado para gerar mensagens de commit."
+        },
+        "cavemanCommit.model": {
+          "type": "string",
+          "default": "",
+          "description": "Identificador do modelo. Vazio usa o modelo obrigatório do provider."
+        },
+        "cavemanCommit.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "medium"
+          ],
+          "default": "medium",
+          "description": "Reasoning effort do Codex. Caveman Commit exige medium."
+        },
+        "cavemanCommit.skillPath": {
+          "type": "string",
+          "default": "skills/caveman-commit/SKILL.md",
+          "description": "Caminho absoluto ou relativo à instalação da extensão para a skill."
+        },
+        "cavemanCommit.timeout": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 1000,
+          "maximum": 600000,
+          "description": "Tempo limite da geração, em milissegundos."
+        },
+        "cavemanCommit.maxDiffSize": {
+          "type": "number",
+          "default": 500000,
+          "minimum": 1000,
+          "description": "Tamanho em bytes que exige confirmação antes do envio integral do diff."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "npm run compile && node --test --test-isolation=none out/test/**/*.test.js",
+    "build": "npm run compile",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.94.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/vsce": "^3.6.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}
