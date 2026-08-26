@@ -16,7 +16,7 @@ export async function pickRepository(
   }));
   const selected = await vscode.window.showQuickPick(items, {
     title: "Selecione o repositório",
-    placeHolder: "Repositório Git com alterações staged",
+    placeHolder: "Repositório Git com alterações locais",
   });
   return selected?.repository;
 }

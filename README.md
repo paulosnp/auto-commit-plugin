@@ -1,8 +1,8 @@
 # Caveman Commit
 
 Caveman Commit é uma extensão do VS Code que gera mensagens de commit em
-português brasileiro usando Codex CLI ou Claude Code CLI sobre alterações
-staged. A IA gera somente texto; a extensão controla leitura do diff e commit.
+português brasileiro usando Codex CLI ou Claude Code CLI. Ela analisa alterações
+locais, copia a mensagem automaticamente e nunca executa o commit.
 
 ## Pré-requisitos
 
@@ -21,12 +21,11 @@ Não há fallback automático. Modelo indisponível produz erro explícito.
 
 ## Uso
 
-1. Faça as alterações.
-2. Adicione arquivos ao stage.
-3. Clique em `Caveman · Terra` ou `Caveman · Sonnet` na Status Bar.
-4. Aguarde a geração.
-5. Revise, edite ou regenere a mensagem.
-6. Confirme `Commit` explicitamente.
+1. Faça as alterações; `git add` não é necessário.
+2. Clique em `Caveman · Terra` ou `Caveman · Sonnet` na Status Bar.
+3. Aguarde a geração: a mensagem já estará na área de transferência.
+4. Use o popup compacto para fechar, editar ou regenerar.
+5. Cole com `Ctrl+V` onde quiser.
 
 Exemplo:
 
@@ -34,7 +33,8 @@ Exemplo:
 feat(usuarios): adicionar filtro por secretaria
 ```
 
-Somente `git diff --cached` é analisado. A extensão nunca executa `git add`,
+Alterações `staged`, `unstaged` e arquivos `untracked` não ignorados são
+analisados. A extensão não altera o index e nunca executa `git add`, `commit`,
 `push`, `reset` ou `checkout`.
 
 ## Comandos
@@ -67,11 +67,14 @@ override para impedir que um identificador do provider anterior seja reutilizado
 ## Segurança
 
 Processos recebem argumentos separados, sem `shell: true`. Prompt e diff entram
-por `stdin`. O commit usa `git commit -F -`, preservando acentos, caracteres
-especiais e body multilinha. Codex roda com sandbox `read-only`, sessão efêmera e
-configuração ignorada; Claude roda sem ferramentas, sem persistência de sessão e
-em safe mode. Providers executam em diretório isolado da extensão; o projeto é
-fornecido à IA somente pelo diff enviado em `stdin`.
+por `stdin`. Nenhum comando Git mutável é executado. Codex roda com sandbox
+`read-only`, sessão efêmera e configuração ignorada; Claude roda sem ferramentas,
+sem persistência de sessão e em safe mode. Providers executam em diretório
+isolado da extensão; o projeto é fornecido à IA somente pelo diff enviado em
+`stdin`.
+
+No Windows, shims npm como `codex.cmd` e `claude.cmd` são resolvidos para o
+entrypoint Node.js correspondente sem ativar shell intermediário.
 
 O diff completo nunca aparece nos logs. Abra `Output → Caveman Commit` para ver
 provider, modelo, repositório, tamanho do diff, duração e exit code.

@@ -10,7 +10,7 @@ const ADDITIONAL_RULES = `REGRAS ADICIONAIS OBRIGATÓRIAS:
 - Não use Markdown, aspas externas ou blocos de código.
 - Não adicione explicações, comentários ou opções alternativas.
 - Retorne exclusivamente uma mensagem de commit.
-- Analise todas as alterações staged apresentadas.
+- Analise todas as alterações locais apresentadas: staged, unstaged e untracked.
 - Use body somente quando necessário pelas regras da skill.
 - Não invente alterações ausentes do diff.
 - Não execute Git, shell, ferramentas ou edição de arquivos.
@@ -29,9 +29,9 @@ ${ADDITIONAL_RULES}
 ${skill}
 </SKILL>
 
-<ALTERACOES_STAGED>
+<ALTERACOES_LOCAIS>
 ${diff}
-</ALTERACOES_STAGED>`;
+</ALTERACOES_LOCAIS>`;
 }
 
 export async function generateCommitMessage(

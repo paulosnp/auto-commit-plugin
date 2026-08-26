@@ -1,4 +1,4 @@
-export type PreviewAction = "commit" | "edit" | "regenerate" | "cancel";
+export type PreviewAction = "copy" | "edit" | "regenerate" | "cancel";
 
 export interface PreviewResult {
   readonly action: PreviewAction;
@@ -11,7 +11,7 @@ export function parsePreviewMessage(value: unknown): PreviewResult | undefined {
   }
   const candidate = value as Record<string, unknown>;
   if (
-    candidate.action !== "commit" &&
+    candidate.action !== "copy" &&
     candidate.action !== "edit" &&
     candidate.action !== "regenerate" &&
     candidate.action !== "cancel"

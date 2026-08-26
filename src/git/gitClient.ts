@@ -18,25 +18,17 @@ function gitError(code: string, message: string, stderr: string): CavemanCommitE
   );
 }
 
-export async function getStagedDiff(
+async function runGitDiff(
   run: ProcessRunner,
   repositoryPath: string,
+  args: readonly string[],
   options: GitClientOptions = {},
 ): Promise<string> {
   let result;
   try {
     result = await run(
       "git",
-      [
-        "-C",
-        repositoryPath,
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--cached",
-        "--no-ext-diff",
-        "--no-textconv",
-      ],
+      ["-C", repositoryPath, "-c", "core.quotepath=false", ...args],
       {
         cwd: repositoryPath,
         timeoutMs: options.timeoutMs ?? DEFAULT_GIT_TIMEOUT,
@@ -53,30 +45,123 @@ export async function getStagedDiff(
   }
 
   if (result.exitCode !== 0) {
-    throw gitError("GIT_DIFF_FAILED", "Falha ao obter git diff.", result.stderr);
+    throw gitError(
+      "GIT_DIFF_FAILED",
+      "Falha ao obter alterações locais do Git.",
+      result.stderr,
+    );
   }
   return result.stdout;
 }
 
-export async function commitMessage(
+export async function getStagedDiff(
   run: ProcessRunner,
   repositoryPath: string,
-  message: string,
   options: GitClientOptions = {},
-): Promise<void> {
+): Promise<string> {
+  return runGitDiff(
+    run,
+    repositoryPath,
+    ["diff", "--cached", "--no-ext-diff", "--no-textconv"],
+    options,
+  );
+}
+
+async function listUntrackedFiles(
+  run: ProcessRunner,
+  repositoryPath: string,
+  options: GitClientOptions,
+): Promise<string[]> {
   const result = await run(
     "git",
-    ["-C", repositoryPath, "commit", "--cleanup=verbatim", "-F", "-"],
+    ["-C", repositoryPath, "ls-files", "--others", "--exclude-standard", "-z"],
     {
       cwd: repositoryPath,
-      input: message,
       timeoutMs: options.timeoutMs ?? DEFAULT_GIT_TIMEOUT,
       cancellation: options.cancellation,
     },
   );
   if (result.exitCode !== 0) {
-    throw gitError("GIT_COMMIT_FAILED", "Falha ao executar git commit.", result.stderr);
+    throw gitError(
+      "GIT_DIFF_FAILED",
+      "Falha ao listar arquivos locais do Git.",
+      result.stderr,
+    );
   }
+  return result.stdout.split("\0").filter((path) => path.length > 0);
+}
+
+async function diffUntrackedFile(
+  run: ProcessRunner,
+  repositoryPath: string,
+  relativePath: string,
+  options: GitClientOptions,
+): Promise<string> {
+  const result = await run(
+    "git",
+    [
+      "-C",
+      repositoryPath,
+      "-c",
+      "core.quotepath=false",
+      "diff",
+      "--no-index",
+      "--no-ext-diff",
+      "--",
+      "/dev/null",
+      relativePath,
+    ],
+    {
+      cwd: repositoryPath,
+      timeoutMs: options.timeoutMs ?? DEFAULT_GIT_TIMEOUT,
+      cancellation: options.cancellation,
+    },
+  );
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    throw gitError(
+      "GIT_DIFF_FAILED",
+      `Falha ao analisar arquivo local: ${relativePath}.`,
+      result.stderr,
+    );
+  }
+  return result.stdout;
+}
+
+export async function getLocalChangesDiff(
+  run: ProcessRunner,
+  repositoryPath: string,
+  options: GitClientOptions = {},
+): Promise<string> {
+  const tracked = await runGitDiff(
+    run,
+    repositoryPath,
+    ["diff", "HEAD", "--no-ext-diff", "--no-textconv"],
+    options,
+  ).catch(async (error: unknown) => {
+    if (!(error instanceof CavemanCommitError) || error.code !== "GIT_DIFF_FAILED") {
+      throw error;
+    }
+    const staged = await getStagedDiff(run, repositoryPath, options);
+    const unstaged = await runGitDiff(
+      run,
+      repositoryPath,
+      ["diff", "--no-ext-diff", "--no-textconv"],
+      options,
+    );
+    return `${staged}\n${unstaged}`.trim();
+  });
+
+  const untrackedFiles = await listUntrackedFiles(run, repositoryPath, options);
+  const untrackedDiffs: string[] = [];
+  for (const relativePath of untrackedFiles) {
+    untrackedDiffs.push(
+      await diffUntrackedFile(run, repositoryPath, relativePath, options),
+    );
+  }
+  return [tracked, ...untrackedDiffs]
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .join("\n\n");
 }
 
 export function diffSizeInBytes(diff: string): number {

@@ -6,6 +6,7 @@ import {
   normalizeRepositories,
   type RepositoryInfo,
 } from "../src/git/getRepository";
+import { copyCommitMessage } from "../src/ui/clipboard";
 import { parsePreviewMessage } from "../src/ui/previewProtocol";
 
 test("normaliza e deduplica repositórios da API Git", () => {
@@ -40,13 +41,27 @@ test("seleciona automaticamente um repo e abre picker para multi-root", async ()
   assert.equal(pickerCalls, 1);
 });
 
-test("protocolo do Preview cobre commit, edição, regeneração e cancelamento", () => {
-  for (const action of ["commit", "edit", "regenerate", "cancel"] as const) {
+test("protocolo do Preview cobre cópia, edição, regeneração e cancelamento", () => {
+  for (const action of ["copy", "edit", "regenerate", "cancel"] as const) {
     assert.deepEqual(parsePreviewMessage({ action, message: "fix: corrigir bug" }), {
       action,
       message: "fix: corrigir bug",
     });
   }
   assert.equal(parsePreviewMessage({ action: "push", message: "x" }), undefined);
-  assert.equal(parsePreviewMessage({ action: "commit", message: 123 }), undefined);
+  assert.equal(parsePreviewMessage({ action: "copy", message: 123 }), undefined);
+});
+
+test("copia a mensagem completa para a área de transferência", async () => {
+  let copied = "";
+  await copyCommitMessage(
+    {
+      writeText(value: string): Promise<void> {
+        copied = value;
+        return Promise.resolve();
+      },
+    },
+    "feat(ui): mostrar popup\n\nCopia automaticamente.",
+  );
+  assert.equal(copied, "feat(ui): mostrar popup\n\nCopia automaticamente.");
 });

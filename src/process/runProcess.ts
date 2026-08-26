@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { CavemanCommitError } from "../errors";
+import { resolveCommand, type ResolvedCommand } from "./resolveCommand";
 
 export interface DisposableLike {
   dispose(): void;
@@ -69,15 +70,26 @@ function terminateProcessTree(child: ChildProcessWithoutNullStreams): void {
 
 export const runProcess: ProcessRunner = (command, args, options) =>
   new Promise<ProcessResult>((resolve, reject) => {
+    let resolvedCommand: ResolvedCommand;
+    try {
+      resolvedCommand = resolveCommand(command);
+    } catch (error) {
+      reject(error);
+      return;
+    }
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(command, [...args], {
+      child = spawn(
+        resolvedCommand.command,
+        [...resolvedCommand.prefixArgs, ...args],
+        {
         cwd: options.cwd,
         detached: process.platform !== "win32",
         windowsHide: true,
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
-      });
+        },
+      );
     } catch (error) {
       reject(
         new CavemanCommitError(

@@ -15,9 +15,8 @@ import {
   type RepositoryInfo,
 } from "./git/getRepository";
 import {
-  commitMessage,
   diffSizeInBytes,
-  getStagedDiff,
+  getLocalChangesDiff,
   isLargeDiff,
 } from "./git/gitClient";
 import { runProcess } from "./process/runProcess";
@@ -27,7 +26,8 @@ import type { CommitProvider, ProviderLogger } from "./providers/provider";
 import { generateCommitMessage } from "./services/commitGenerator";
 import { validateCommitMessage } from "./services/responseValidator";
 import { loadSkill } from "./skills/loader";
-import { showCommitPreview } from "./ui/commitPreview";
+import { copyCommitMessage } from "./ui/clipboard";
+import { showCommitEditor, showCommitPreview } from "./ui/commitPreview";
 import { pickRepository } from "./ui/repositoryPicker";
 import { CavemanStatusBar } from "./ui/statusBar";
 
@@ -168,7 +168,7 @@ async function createMessage(
   }
 }
 
-async function generateAndCommit(
+async function generateAndCopy(
   context: vscode.ExtensionContext,
   statusBar: CavemanStatusBar,
   providers: Readonly<Record<ProviderId, CommitProvider>>,
@@ -181,17 +181,17 @@ async function generateAndCommit(
     return;
   }
 
-  const diff = await getStagedDiff(runProcess, repository.path);
+  const diff = await getLocalChangesDiff(runProcess, repository.path);
   if (diff.trim().length === 0) {
     await vscode.window.showWarningMessage(
-      "Nenhuma alteração staged encontrada. Adicione arquivos ao stage antes de gerar o commit.",
+      "Nenhuma alteração local encontrada para gerar a mensagem.",
     );
     return;
   }
   const bytes = diffSizeInBytes(diff);
   if (isLargeDiff(diff, settings.maxDiffSize)) {
     const decision = await vscode.window.showWarningMessage(
-      "O diff staged possui um tamanho elevado e pode aumentar significativamente o processamento. Continuar mesmo assim?",
+      "As alterações locais possuem tamanho elevado e podem aumentar significativamente o processamento. Continuar mesmo assim?",
       { modal: true },
       "Continuar",
       "Cancelar",
@@ -214,7 +214,7 @@ async function generateAndCommit(
     logger.log(`Reasoning effort: ${settings.reasoningEffort}.`);
   }
   logger.log(`Repositório: ${repository.path}.`);
-  logger.log(`Diff staged: ${bytes} bytes.`);
+  logger.log(`Alterações locais: ${bytes} bytes.`);
   logger.log("Geração iniciada.");
 
   let message = await createMessage(
@@ -225,10 +225,23 @@ async function generateAndCommit(
     diff,
     statusBar,
   );
+  await copyCommitMessage(vscode.env.clipboard, message);
+  logger.log("Mensagem gerada e copiada para a área de transferência.");
   for (;;) {
-    const preview = await showCommitPreview(message);
+    const preview = await showCommitPreview(
+      message,
+      settings.provider === "codex" ? "Codex" : "Claude Code",
+      settings.model,
+    );
     if (preview.action === "cancel") {
-      logger.log("Preview cancelado; Git não alterado.");
+      logger.log("Popup fechado; mensagem permanece na área de transferência.");
+      return;
+    }
+    if (preview.action === "copy") {
+      await copyCommitMessage(vscode.env.clipboard, message);
+      await vscode.window.showInformationMessage(
+        "Mensagem de commit copiada para a área de transferência.",
+      );
       return;
     }
     if (preview.action === "regenerate") {
@@ -241,25 +254,19 @@ async function generateAndCommit(
         diff,
         statusBar,
       );
+      await copyCommitMessage(vscode.env.clipboard, message);
+      logger.log("Nova mensagem copiada para a área de transferência.");
       continue;
     }
     if (preview.action === "edit") {
-      message = validateCommitMessage(preview.message).message;
+      const edited = await showCommitEditor(message);
+      if (edited !== undefined) {
+        message = validateCommitMessage(edited).message;
+        await copyCommitMessage(vscode.env.clipboard, message);
+        logger.log("Mensagem editada e copiada para a área de transferência.");
+      }
       continue;
     }
-
-    const approved = validateCommitMessage(preview.message).message;
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "Caveman Commit: executando git commit",
-        cancellable: false,
-      },
-      () => commitMessage(runProcess, repository.path, approved),
-    );
-    logger.log("Commit concluído.");
-    await vscode.window.showInformationMessage("Commit realizado com sucesso.");
-    return;
   }
 }
 
@@ -293,7 +300,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       generationRunning = true;
       try {
-        await generateAndCommit(context, statusBar, providers, logger);
+        await generateAndCopy(context, statusBar, providers, logger);
       } catch (error) {
         const message = asUserMessage(error);
         logger.log(

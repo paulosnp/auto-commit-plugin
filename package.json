@@ -1,9 +1,10 @@
 {
   "name": "caveman-commit",
   "displayName": "Caveman Commit",
-  "description": "Gera mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
-  "version": "0.1.0",
+  "description": "Gera e copia mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
+  "version": "0.2.0",
   "publisher": "local",
+  "icon": "media/icon.png",
   "license": "MIT",
   "engines": {
     "vscode": "^1.94.0"
@@ -88,7 +89,7 @@
           "type": "number",
           "default": 500000,
           "minimum": 1000,
-          "description": "Tamanho em bytes que exige confirmação antes do envio integral do diff."
+          "description": "Tamanho em bytes que exige confirmação antes do envio integral das alterações locais."
         }
       }
     }
