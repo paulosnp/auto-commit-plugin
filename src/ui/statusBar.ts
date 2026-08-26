@@ -27,7 +27,7 @@ function buildTooltip(
   tooltip.appendMarkdown("### $(caveman-commit) Caveman Commit\n\n");
   tooltip.appendMarkdown(
     processing
-      ? "$(sync~spin) **Gerando mensagem de commit…**\n\n"
+      ? "$(sync~spin) **Gerando mensagem de commit…** Clique novamente para reiniciar.\n\n"
       : "$(check) **Pronto para gerar e copiar**\n\n",
   );
   tooltip.appendMarkdown("---\n\n");

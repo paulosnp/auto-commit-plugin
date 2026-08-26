@@ -27,6 +27,12 @@ Não há fallback automático. Modelo indisponível produz erro explícito.
 4. Use o popup compacto para fechar, editar ou regenerar.
 5. Cole com `Ctrl+V` onde quiser.
 
+Um novo clique durante a execução cancela o fluxo atual e inicia outra geração.
+Em workspaces com vários repositórios, somente os que possuem alterações são
+processados. Dois ou mais repositórios alterados abrem um editor completo com
+uma mensagem editável e um botão de cópia para cada repositório; apenas um
+repositório alterado mantém o popup compacto.
+
 Exemplo:
 
 ```text

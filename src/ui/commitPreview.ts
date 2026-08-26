@@ -2,7 +2,17 @@ import { randomBytes } from "node:crypto";
 
 import * as vscode from "vscode";
 
-import { parsePreviewMessage, type PreviewResult } from "./previewProtocol";
+import {
+  parsePreviewMessage,
+  parseRepositoryCopyMessage,
+  type PreviewResult,
+} from "./previewProtocol";
+
+export interface RepositoryCommitDraft {
+  readonly repositoryName: string;
+  readonly repositoryPath: string;
+  readonly message: string;
+}
 
 interface PreviewItem extends vscode.QuickPickItem {
   readonly action: PreviewResult["action"];
@@ -17,6 +27,7 @@ export async function showCommitPreview(
   message: string,
   provider: string,
   model: string,
+  cancellation?: vscode.CancellationToken,
 ): Promise<PreviewResult> {
   const subject = message.split(/\r?\n/, 1)[0] ?? message;
   const body = compactBody(message);
@@ -48,7 +59,7 @@ export async function showCommitPreview(
     matchOnDescription: true,
     matchOnDetail: true,
     ignoreFocusOut: true,
-  });
+  }, cancellation);
   return { action: selected?.action ?? "cancel", message };
 }
 
@@ -215,6 +226,7 @@ export function showCommitEditor(
   message: string,
   provider: string,
   model: string,
+  cancellation?: vscode.CancellationToken,
 ): Promise<string | undefined> {
   const mediaUri = vscode.Uri.joinPath(extensionUri, "media");
   const panel = vscode.window.createWebviewPanel(
@@ -257,11 +269,229 @@ export function showCommitEditor(
         finish(undefined);
       }
     });
+    const cancellationRegistration: { current?: vscode.Disposable } = {};
+    cancellationRegistration.current = cancellation?.onCancellationRequested(() => {
+      finish(undefined);
+    });
     panel.onDidDispose(() => {
       messageDisposable.dispose();
+      cancellationRegistration.current?.dispose();
       if (!resolved) {
         resolved = true;
         resolve(undefined);
+      }
+    });
+  });
+}
+
+function multiEditorHtml(
+  drafts: readonly RepositoryCommitDraft[],
+  nonce: string,
+  iconUri: string,
+  cspSource: string,
+  provider: string,
+  model: string,
+): string {
+  const cards = drafts
+    .map(
+      (draft, index) => `
+      <article class="card" data-index="${index}">
+        <div class="card-header">
+          <div class="repository">
+            <strong>${escapeHtml(draft.repositoryName)}</strong>
+            <span title="${escapeHtml(draft.repositoryPath)}">${escapeHtml(draft.repositoryPath)}</span>
+          </div>
+          <span class="subject-count"></span>
+        </div>
+        <textarea spellcheck="true" aria-label="Mensagem de commit para ${escapeHtml(draft.repositoryName)}">${escapeHtml(draft.message)}</textarea>
+        <div class="card-footer">
+          <span class="line-count"></span>
+          <button class="copy">Copiar mensagem</button>
+        </div>
+      </article>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource}; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caveman Commit</title>
+  <style nonce="${nonce}">
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--vscode-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); }
+    .page { width: min(1180px, 100%); margin: 0 auto; padding: 32px 28px 48px; }
+    .hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+    .brand img { width: 56px; height: 56px; flex: 0 0 auto; filter: drop-shadow(0 7px 14px rgba(0, 0, 0, .28)); }
+    .eyebrow { margin: 0 0 5px; color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(22px, 3vw, 31px); line-height: 1.15; }
+    .subtitle { margin: 7px 0 0; color: var(--vscode-descriptionForeground); line-height: 1.45; }
+    .badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .badge { max-width: 220px; overflow: hidden; padding: 5px 9px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 999px; color: var(--vscode-descriptionForeground); background: var(--vscode-badge-background); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 18px; }
+    .card { overflow: hidden; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 10px; background: var(--vscode-sideBar-background); box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
+    .card-header, .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; }
+    .card-header { min-height: 58px; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
+    .card-footer { border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .repository { min-width: 0; }
+    .repository strong, .repository span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .repository span { margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 11px; }
+    .subject-count { color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; }
+    .subject-count.warning { color: var(--vscode-editorWarning-foreground); }
+    textarea { display: block; width: 100%; min-height: 250px; resize: vertical; padding: 16px; border: 0; color: var(--vscode-input-foreground); background: var(--vscode-input-background); font: 14px/1.65 var(--vscode-editor-font-family); }
+    textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -2px; }
+    button { min-height: 34px; padding: 7px 16px; border: 1px solid transparent; border-radius: 4px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); font: inherit; cursor: pointer; }
+    button:hover { background: var(--vscode-button-hoverBackground); }
+    button:disabled { cursor: not-allowed; opacity: .55; }
+    .close-row { display: flex; justify-content: flex-end; margin-top: 18px; }
+    .close { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+    .close:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    @media (max-width: 720px) { .page { padding: 22px 14px 36px; } .hero { align-items: flex-start; flex-direction: column; } .badges { justify-content: flex-start; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="brand">
+        <img src="${escapeHtml(iconUri)}" alt="" aria-hidden="true">
+        <div>
+          <p class="eyebrow">Caveman Commit</p>
+          <h1>${drafts.length} mensagens geradas</h1>
+          <p class="subtitle">Edite e copie cada mensagem no repositório correspondente.</p>
+        </div>
+      </div>
+      <div class="badges" aria-label="Configuração ativa">
+        <span class="badge">${escapeHtml(provider)}</span>
+        <span class="badge" title="${escapeHtml(model)}">${escapeHtml(model)}</span>
+        <span class="badge">${drafts.length} repositórios</span>
+      </div>
+    </header>
+    <section class="grid">${cards}</section>
+    <div class="close-row"><button id="close" class="close">Fechar</button></div>
+  </main>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.querySelectorAll('.card').forEach((card) => {
+      const textarea = card.querySelector('textarea');
+      const button = card.querySelector('.copy');
+      const subjectCount = card.querySelector('.subject-count');
+      const lineCount = card.querySelector('.line-count');
+      const refresh = () => {
+        const normalized = textarea.value.replace(/\\r\\n/g, '\\n');
+        const lines = normalized.split('\\n');
+        const subjectLength = (lines[0] || '').trim().length;
+        subjectCount.textContent = subjectLength + '/50 no subject';
+        subjectCount.classList.toggle('warning', subjectLength > 50);
+        lineCount.textContent = lines.length + (lines.length === 1 ? ' linha' : ' linhas');
+        button.disabled = normalized.trim().length === 0;
+        if (button.dataset.copied === 'true') {
+          button.textContent = 'Copiar mensagem';
+          button.dataset.copied = 'false';
+        }
+      };
+      const copy = () => vscode.postMessage({
+        action: 'copyRepository',
+        index: Number(card.dataset.index),
+        message: textarea.value,
+      });
+      textarea.addEventListener('input', refresh);
+      textarea.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !button.disabled) {
+          event.preventDefault();
+          copy();
+        }
+      });
+      button.addEventListener('click', copy);
+      refresh();
+    });
+    window.addEventListener('message', (event) => {
+      if (event.data?.action !== 'copied') return;
+      const button = document.querySelector('.card[data-index="' + event.data.index + '"] .copy');
+      if (button) {
+        button.textContent = 'Copiada';
+        button.dataset.copied = 'true';
+      }
+    });
+    document.getElementById('close').addEventListener('click', () =>
+      vscode.postMessage({ action: 'close' }));
+  </script>
+</body>
+</html>`;
+}
+
+export function showMultiCommitEditor(
+  extensionUri: vscode.Uri,
+  drafts: readonly RepositoryCommitDraft[],
+  provider: string,
+  model: string,
+  copyMessage: (draft: RepositoryCommitDraft) => Promise<void>,
+  cancellation?: vscode.CancellationToken,
+): Promise<void> {
+  const mediaUri = vscode.Uri.joinPath(extensionUri, "media");
+  const panel = vscode.window.createWebviewPanel(
+    "cavemanCommit.multiEditor",
+    `Caveman Commit · ${drafts.length} repositórios`,
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: false,
+      localResourceRoots: [mediaUri],
+    },
+  );
+  panel.iconPath = vscode.Uri.joinPath(mediaUri, "icon-small.png");
+  const nonce = randomBytes(16).toString("hex");
+  panel.webview.html = multiEditorHtml(
+    drafts,
+    nonce,
+    panel.webview.asWebviewUri(vscode.Uri.joinPath(mediaUri, "icon.png")).toString(),
+    panel.webview.cspSource,
+    provider,
+    model,
+  );
+
+  return new Promise<void>((resolve) => {
+    let resolved = false;
+    const finish = (): void => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve();
+      panel.dispose();
+    };
+    const messageDisposable = panel.webview.onDidReceiveMessage((value: unknown) => {
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        (value as Record<string, unknown>).action === "close"
+      ) {
+        finish();
+        return;
+      }
+      const result = parseRepositoryCopyMessage(value);
+      const original = result === undefined ? undefined : drafts[result.index];
+      if (result === undefined || original === undefined) {
+        return;
+      }
+      void copyMessage({ ...original, message: result.message })
+        .then(() => panel.webview.postMessage({ action: "copied", index: result.index }))
+        .then(undefined, (error: unknown) =>
+          vscode.window.showErrorMessage(
+            error instanceof Error ? error.message : "Mensagem de commit inválida.",
+          ),
+        );
+    });
+    const cancellationRegistration: { current?: vscode.Disposable } = {};
+    cancellationRegistration.current = cancellation?.onCancellationRequested(finish);
+    panel.onDidDispose(() => {
+      messageDisposable.dispose();
+      cancellationRegistration.current?.dispose();
+      if (!resolved) {
+        resolved = true;
+        resolve();
       }
     });
   });
