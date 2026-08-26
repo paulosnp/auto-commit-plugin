@@ -2,7 +2,7 @@
   "name": "caveman-commit",
   "displayName": "Caveman Commit",
   "description": "Gera e copia mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "local",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -29,11 +29,20 @@
   ],
   "main": "./out/src/extension.js",
   "contributes": {
+    "icons": {
+      "caveman-commit": {
+        "description": "Caveman Commit",
+        "default": {
+          "fontPath": "media/caveman-commit.woff",
+          "fontCharacter": "\\E900"
+        }
+      }
+    },
     "commands": [
       {
         "command": "cavemanCommit.generateCommit",
         "title": "Caveman Commit: Generate Commit",
-        "icon": "$(git-commit)"
+        "icon": "$(caveman-commit)"
       },
       {
         "command": "cavemanCommit.selectProvider",

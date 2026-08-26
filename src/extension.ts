@@ -259,7 +259,12 @@ async function generateAndCopy(
       continue;
     }
     if (preview.action === "edit") {
-      const edited = await showCommitEditor(message);
+      const edited = await showCommitEditor(
+        context.extensionUri,
+        message,
+        settings.provider === "codex" ? "Codex" : "Claude Code",
+        settings.model,
+      );
       if (edited !== undefined) {
         message = validateCommitMessage(edited).message;
         await copyCommitMessage(vscode.env.clipboard, message);

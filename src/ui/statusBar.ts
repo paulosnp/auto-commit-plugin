@@ -17,7 +17,7 @@ export class CavemanStatusBar implements vscode.Disposable {
   public update(provider: ProviderId, model: string, reasoningEffort: string): void {
     const defaults = DEFAULT_MODELS[provider];
     const label = model === defaults.id ? defaults.shortName : model;
-    this.item.text = `$(git-commit) Caveman · ${label}`;
+    this.item.text = `$(caveman-commit) Caveman · ${label}`;
     this.item.tooltip =
       provider === "codex"
         ? `Gerar mensagem de commit com Caveman Commit\nProvider: Codex\nModelo: ${model}\nReasoning: ${reasoningEffort}`
@@ -25,7 +25,7 @@ export class CavemanStatusBar implements vscode.Disposable {
   }
 
   public setProcessing(): void {
-    this.item.text = "$(sync~spin) Caveman";
+    this.item.text = "$(caveman-commit) $(sync~spin) Caveman";
     this.item.tooltip = "Gerando mensagem de commit…";
   }
 
