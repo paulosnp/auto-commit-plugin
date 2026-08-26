@@ -8,4 +8,5 @@ out/test/**
 tsconfig.json
 eslint.config.js
 node_modules/**
+scripts/**
 *.vsix

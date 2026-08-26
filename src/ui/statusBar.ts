@@ -81,7 +81,8 @@ export class CavemanStatusBar implements vscode.Disposable {
   }
 
   public setProcessing(): void {
-    this.item.text = "$(caveman-commit) $(sync~spin) Caveman Commit";
+    this.item.text =
+      "$(caveman-commit-ring~spin)$(caveman-commit-center) Caveman Commit";
     this.item.tooltip = buildTooltip(
       this.provider,
       this.model,
