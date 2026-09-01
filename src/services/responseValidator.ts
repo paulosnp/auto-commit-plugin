@@ -10,7 +10,7 @@ export interface ValidatedCommitMessage {
 
 export function removeOutputArtifacts(raw: string): string {
   let value = raw.trim().replace(/\r\n/g, "\n");
-  const fenced = value.match(/^```(?:text)?\s*\n([\s\S]*?)\n```$/i);
+  const fenced = value.match(/^```[a-z]*[ \t]*\n([\s\S]*?)\n?```$/i);
   if (fenced?.[1] !== undefined) {
     value = fenced[1].trim();
   }

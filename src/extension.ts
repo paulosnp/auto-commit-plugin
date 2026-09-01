@@ -151,8 +151,10 @@ async function createMessage(
   cancellation: vscode.CancellationToken,
 ): Promise<string> {
   statusBar.setProcessing();
+  // ponytail: uma reentrega basta; se duas falharem, não é azar de formatação.
+  let correction: string | undefined;
   try {
-    const raw = await vscode.window.withProgress(
+    return await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         title: "Caveman Commit: gerando mensagem",
@@ -171,13 +173,29 @@ async function createMessage(
           linkedCancellation.cancel();
         }
         try {
-          return await generateCommitMessage(provider, skill, diff, {
-            model: settings.model,
-            reasoningEffort: settings.reasoningEffort,
-            cwd: providerWorkingDirectory,
-            timeoutMs: settings.timeout,
-            cancellation: linkedCancellation.token,
-          });
+          for (let attempt = 0; ; attempt += 1) {
+            const raw = await generateCommitMessage(
+              provider,
+              skill,
+              diff,
+              {
+                model: settings.model,
+                reasoningEffort: settings.reasoningEffort,
+                cwd: providerWorkingDirectory,
+                timeoutMs: settings.timeout,
+                cancellation: linkedCancellation.token,
+              },
+              correction,
+            );
+            try {
+              return validateCommitMessage(raw).message;
+            } catch (error) {
+              if (attempt >= 1 || !(error instanceof CavemanCommitError)) {
+                throw error;
+              }
+              correction = error.userMessage;
+            }
+          }
         } finally {
           for (const registration of registrations) {
             registration.dispose();
@@ -186,7 +204,6 @@ async function createMessage(
         }
       },
     );
-    return validateCommitMessage(raw).message;
   } finally {
     statusBar.update(settings.provider, settings.model, settings.reasoningEffort);
   }

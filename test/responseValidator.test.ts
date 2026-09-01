@@ -35,6 +35,10 @@ test("remove somente fence integral ou aspas externas", () => {
     "fix(auth): corrigir token",
   );
   assert.equal(
+    removeOutputArtifacts("```bash\nfix(auth): corrigir token\n```"),
+    "fix(auth): corrigir token",
+  );
+  assert.equal(
     removeOutputArtifacts('"docs(api): atualizar rotas"'),
     "docs(api): atualizar rotas",
   );

@@ -18,7 +18,11 @@ const ADDITIONAL_RULES = `REGRAS ADICIONAIS OBRIGATÓRIAS:
 Exemplo correto: feat(auth): adicionar validação do token MFA
 Exemplo incorreto: feat(auth): add MFA token validation`;
 
-export function buildCommitPrompt(skill: string, diff: string): string {
+export function buildCommitPrompt(skill: string, diff: string, correction?: string): string {
+  const retry =
+    correction === undefined
+      ? ""
+      : `\n\nA tentativa anterior foi rejeitada: ${correction}\nCorrija o formato e retorne apenas a mensagem de commit.`;
   return `Você é responsável exclusivamente por gerar uma mensagem de commit Git.
 
 Siga rigorosamente todas as instruções da skill fornecida.
@@ -31,7 +35,7 @@ ${skill}
 
 <ALTERACOES_LOCAIS>
 ${diff}
-</ALTERACOES_LOCAIS>`;
+</ALTERACOES_LOCAIS>${retry}`;
 }
 
 export async function generateCommitMessage(
@@ -39,6 +43,7 @@ export async function generateCommitMessage(
   skill: string,
   diff: string,
   options: CommitGenerationOptions,
+  correction?: string,
 ): Promise<string> {
-  return provider.generateCommit(buildCommitPrompt(skill, diff), options);
+  return provider.generateCommit(buildCommitPrompt(skill, diff, correction), options);
 }

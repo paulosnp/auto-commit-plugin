@@ -45,4 +45,10 @@ test("prompt contém pt-BR, skill, diff e proibição de ferramentas", () => {
   assert.match(prompt, /diff --git a\/auth\.ts b\/auth\.ts/);
   assert.match(prompt, /Não execute Git, shell, ferramentas/);
   assert.match(prompt, /feat\(auth\): adicionar validação do token/);
+  assert.doesNotMatch(prompt, /tentativa anterior/);
+});
+
+test("prompt de retentativa inclui o motivo da rejeição", () => {
+  const prompt = buildCommitPrompt("skill-test", "diff", "Resposta inválida da IA.");
+  assert.match(prompt, /A tentativa anterior foi rejeitada: Resposta inválida da IA\./);
 });
