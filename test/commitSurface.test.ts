@@ -18,7 +18,7 @@ test("mensagens e nomes externos não podem injetar HTML na webview", () => {
   const payload = '</textarea><script>alert("injected")</script><img src=x onerror=alert(1)>';
   for (const mode of ["preview", "editor", "multi"] as const) {
     const html = renderCommitSurface({
-      ...options, mode, provider: payload, model: payload,
+      ...options, mode, session: true, provider: payload, model: payload,
       drafts: [{ message: payload, repositoryName: payload, repositoryPath: payload }],
     });
     assert.ok(!html.includes(payload));
@@ -31,7 +31,7 @@ test("mensagens e nomes externos não podem injetar HTML na webview", () => {
 
 test("script renderizado permanece JavaScript válido em todos os modos", () => {
   for (const mode of ["preview", "editor", "multi"] as const) {
-    const html = renderCommitSurface({ ...options, mode });
+    const html = renderCommitSurface({ ...options, mode, session: true });
     const script = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1];
     assert.ok(script);
     assert.doesNotThrow(() => new Script(script));

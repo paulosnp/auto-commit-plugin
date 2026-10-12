@@ -3,6 +3,9 @@ import Module, { createRequire } from "node:module";
 import test, { mock } from "node:test";
 import type { Uri } from "vscode";
 import type * as PreviewUi from "../src/ui/commitPreview";
+import type { CommitDraft } from "../src/services/commitSession";
+import { parseSessionMessage } from "../src/ui/previewProtocol";
+import { validateCommitMessage } from "../src/services/responseValidator";
 
 class FakePanel {
   public disposed = false;
@@ -117,4 +120,87 @@ test("multi-repositório confirma cópia após sucesso e mantém aberto após er
   panel.emit({ action: "close" });
   await result;
   assert.equal(panel.disposed, true);
+});
+
+const draft: CommitDraft = {
+  repositoryName: "api", repositoryPath: "/api", message, scope: "all", diffHash: "old-hash", cacheKey: "key",
+  provider: "Codex", model: "model", stale: false, reused: false, copied: true, canUseGit: true,
+};
+const token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
+const event = (action: string, index = 0, text = message, allowStale = false): unknown => ({ action, index, message: text, allowStale });
+const tick = async (): Promise<void> => { await new Promise(resolve => setImmediate(resolve)); };
+
+test("protocolo de sessão rejeita ações, índices, payloads e flags adulterados", () => {
+  assert.ok(parseSessionMessage(event("useGit", 0, message, true)));
+  for (const value of [null, "copy", {}, event("push"), event("copy", -1), event("copy", 0.5), { action: "copy", index: 0, message, allowStale: "true" }, { action: "useGit", index: 0, message: 1, allowStale: false }]) {
+    assert.equal(parseSessionMessage(value), undefined);
+  }
+});
+
+test("sessão individual preserva texto em erros e stale; fecha somente após copiar/aplicar", async () => {
+  let calls = 0; let cancelled = 0;
+  let stale = true;
+  const result = ui.showCommitSession(extensionUri, [draft], {
+    act: async (original, action, text, allowStale) => {
+      calls++; validateCommitMessage(text);
+      assert.equal(action, "useGit");
+      if (stale && !allowStale) return { outcome: "stale", draft: { ...original, message: text, stale: true } };
+      return { outcome: "applied", draft: { ...original, message: text } };
+    },
+    regenerate: async () => { throw new Error("provider failed"); },
+    reportError() {}, cancel: () => { cancelled++; },
+  }, token);
+  const panel = currentPanel();
+  panel.emit(event("edit"));
+  assert.match(panel.webview.html, /data-mode="editor"/);
+  panel.emit(event("useGit", 0, "inválida")); await tick();
+  assert.equal(panel.disposed, false);
+  assert.equal((panel.sent.at(-1) as { outcome: string }).outcome, "error");
+  panel.emit(event("useGit", 0, "fix(api): preservar edição")); await tick();
+  assert.equal((panel.sent.at(-1) as { outcome: string }).outcome, "stale");
+  panel.emit(event("regenerate")); await tick();
+  assert.equal(panel.disposed, false);
+  assert.equal((panel.sent.at(-1) as { outcome: string }).outcome, "error");
+  stale = false;
+  panel.emit(event("useGit", 0, "fix(api): preservar edição", true));
+  await result;
+  assert.equal(calls, 3); assert.equal(cancelled, 1);
+});
+
+test("regeneração por repositório troca snapshot só após sucesso e mantém editor múltiplo", async () => {
+  let observed = ""; let reject = true;
+  const result = ui.showCommitSession(extensionUri, [draft, { ...draft, repositoryName: "web", repositoryPath: "/web" }], {
+    act: async (original, _action, text) => { observed = original.diffHash; return { outcome: "copied", draft: { ...original, message: text } }; },
+    regenerate: async original => { if (reject) throw new Error("failed"); return { ...original, diffHash: "new-hash", message: "fix(web): atualizar interface" }; },
+    reportError() {}, cancel() {},
+  }, token);
+  const panel = currentPanel(); const originalHtml = panel.webview.html;
+  panel.emit(event("regenerate", 1)); await tick();
+  panel.emit(event("copy", 1)); await tick();
+  assert.equal(observed, "old-hash");
+  reject = false;
+  panel.emit(event("regenerate", 1)); await tick();
+  assert.equal((panel.sent.at(-1) as { outcome: string; index: number }).outcome, "updated");
+  assert.equal((panel.sent.at(-1) as { index: number }).index, 1);
+  assert.equal(panel.webview.html, originalHtml); // Other unsaved textareas are not rebuilt.
+  panel.emit(event("copy", 1)); await tick();
+  assert.equal(observed, "new-hash"); assert.equal(panel.disposed, false);
+  panel.emit(event("close")); await result;
+});
+
+test("sessão ignora índice inválido e duplicação pendente; fechar cancela operação", async () => {
+  let complete: ((value: CommitDraft) => void) | undefined; let calls = 0; let cancelled = 0;
+  const result = ui.showCommitSession(extensionUri, [draft], {
+    act: async original => ({ outcome: "copied", draft: original }),
+    regenerate: () => { calls++; return new Promise(resolve => { complete = resolve; }); },
+    reportError() {}, cancel: () => { cancelled++; },
+  }, token);
+  const panel = currentPanel();
+  panel.emit(event("regenerate", 4));
+  panel.emit(event("regenerate")); panel.emit(event("regenerate"));
+  assert.equal(calls, 1);
+  panel.emit(event("close")); await result;
+  const sent = panel.sent.length;
+  complete?.({ ...draft, message: "fix(api): nova mensagem" }); await tick();
+  assert.equal(cancelled, 1); assert.equal(panel.sent.length, sent);
 });

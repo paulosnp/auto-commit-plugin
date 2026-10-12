@@ -1,7 +1,16 @@
+import { sessionScript } from "./sessionScript";
+
 export interface SurfaceDraft {
   readonly repositoryName?: string;
   readonly repositoryPath?: string;
   readonly message: string;
+  readonly scope?: "all" | "staged";
+  readonly stale?: boolean;
+  readonly reused?: boolean;
+  readonly copied?: boolean;
+  readonly canUseGit?: boolean;
+  readonly provider?: string;
+  readonly model?: string;
 }
 
 export interface CommitSurfaceOptions {
@@ -12,6 +21,7 @@ export interface CommitSurfaceOptions {
   readonly nonce: string;
   readonly cspSource: string;
   readonly iconUri: string;
+  readonly session?: boolean;
 }
 
 function escapeHtml(value: string): string {
@@ -33,9 +43,22 @@ function icon(name: keyof typeof paths): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }
 
-function editor(draft: SurfaceDraft, index: number, multi: boolean): string {
+function details(draft: SurfaceDraft): string {
+  return `<p class="draft-meta">${escapeHtml(draft.scope === "staged" ? "Somente staged" : "Todas as alterações")} · <span class="draft-model">${escapeHtml(draft.provider ?? "")} · ${escapeHtml(draft.model ?? "")}</span><span class="reuse">${draft.reused ? " · Mensagem reutilizada" : ""}</span></p>`;
+}
+
+function warning(draft: SurfaceDraft): string {
+  return `<div class="stale-warning" role="status" ${draft.stale ? "" : "hidden"}><p>As alterações mudaram. Esta mensagem corresponde ao diff anterior.</p><div class="secondary-actions"><button class="secondary stale-regenerate" type="button">Regenerar</button><button class="secondary use-previous" type="button">Copiar mensagem anterior</button></div></div>`;
+}
+
+function gitButton(draft: SurfaceDraft): string {
+  return `<button class="secondary use-git" type="button" ${draft.canUseGit ? "" : 'disabled title="Git nativo indisponível para este repositório."'}>Usar no Git</button>${draft.canUseGit ? "" : '<span class="git-unavailable">Git nativo indisponível para este repositório.</span>'}`;
+}
+
+function editor(draft: SurfaceDraft, index: number, multi: boolean, session: boolean): string {
   return `<section class="draft" data-index="${index}">
     ${multi ? `<header class="repository">${icon("folder")}<div><h2>${escapeHtml(draft.repositoryName ?? "Repositório")}</h2><p title="${escapeHtml(draft.repositoryPath ?? "")}">${escapeHtml(draft.repositoryPath ?? "")}</p></div></header>` : ""}
+    ${session ? details(draft) + warning(draft) : ""}
     <div class="composer">
       <div class="composer-heading"><label for="message-${index}">Mensagem de commit</label><span class="subject-count" aria-live="polite"></span></div>
       <textarea id="message-${index}" spellcheck="true" aria-describedby="hint-${index} feedback-${index}">${escapeHtml(draft.message)}</textarea>
@@ -43,7 +66,7 @@ function editor(draft: SurfaceDraft, index: number, multi: boolean): string {
     </div>
     <div class="draft-actions">
       <p id="feedback-${index}" class="feedback" role="status" aria-live="polite">${multi ? "Pronta para copiar" : "Edite a mensagem antes de copiar."}</p>
-      <button class="primary copy" type="button">${icon(multi ? "copy" : "arrow")}<span>${multi ? "Copiar mensagem" : "Aplicar e copiar"}</span></button>
+      <div class="secondary-actions">${session ? `<button class="secondary regenerate" type="button">${icon("retry")}Regenerar</button>${gitButton(draft)}` : ""}<button class="primary copy" type="button">${icon(multi ? "copy" : "arrow")}<span>${multi ? "Copiar mensagem" : session ? "Copiar e fechar" : "Aplicar e copiar"}</span></button></div>
     </div>
   </section>`;
 }
@@ -55,17 +78,17 @@ export function renderCommitSurface(options: CommitSurfaceOptions): string {
   const body = bodyLines.join("\n").trim();
   const title = mode === "preview" ? "Mensagem pronta" : mode === "editor" ? "Editar mensagem" : "Mensagens prontas";
   const content = mode === "preview"
-    ? `<section class="response" aria-label="Mensagem de commit gerada">
-        <div class="response-label"><span>Caveman Commit</span><span class="copied-label">${icon("check")}Copiada</span></div>
+    ? `<section class="draft preview-draft" data-index="0">${options.session ? details(drafts[0]!) + warning(drafts[0]!) : ""}<section class="response" aria-label="Mensagem de commit gerada">
+        <div class="response-label"><span>Caveman Commit</span><span class="copied-label">${!options.session || drafts[0]?.copied ? icon("check") + "Copiada" : "Aguardando revisão"}</span></div>
         <pre class="commit-subject">${escapeHtml(subject)}</pre>
         ${body ? `<pre class="commit-body">${escapeHtml(body)}</pre>` : ""}
-        <p class="clipboard-note">Mensagem completa na área de transferência.</p>
+        <p class="clipboard-note">${!options.session || drafts[0]?.copied ? "Mensagem completa na área de transferência." : "Revise antes de copiar ou usar no Git."}</p>
       </section>
       <div class="preview-actions">
-        <div class="secondary-actions"><button id="edit" class="secondary" type="button">${icon("edit")}Editar</button><button id="regenerate" class="secondary" type="button">${icon("retry")}Regenerar</button></div>
+        <div class="secondary-actions"><button id="edit" class="secondary" type="button">${icon("edit")}Editar</button><button id="regenerate" class="secondary regenerate" type="button">${icon("retry")}Regenerar</button>${options.session ? gitButton(drafts[0]!) : ""}</div>
         <button id="copy" class="primary" type="button">${icon("copy")}Copiar e fechar</button>
-      </div>`
-    : drafts.map((draft, index) => editor(draft, index, mode === "multi")).join("");
+      </div><p class="feedback" role="status" aria-live="polite"></p></section>`
+    : drafts.map((draft, index) => editor(draft, index, mode === "multi", options.session === true)).join("");
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -139,6 +162,12 @@ export function renderCommitSurface(options: CommitSurfaceOptions): string {
     .draft-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; }
     .feedback { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
     .feedback.error { color: var(--error); }
+    [hidden] { display: none !important; }
+    .draft-meta, .git-unavailable { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .git-unavailable { flex-basis: 100%; }
+    .stale-warning { padding: 14px 16px; margin: 16px 0; border: 1px solid var(--vscode-inputValidation-warningBorder, var(--line)); border-radius: 12px; background: var(--vscode-inputValidation-warningBackground, var(--surface)); }
+    .stale-warning p { margin: 0 0 12px; }
+    .draft-actions { flex-wrap: wrap; }
     .footnote { margin: 44px 0 0; text-align: center; color: var(--muted); font-size: 12px; }
     .vscode-high-contrast .composer, .vscode-high-contrast-light .composer { border-color: var(--vscode-contrastBorder, var(--ink)); }
     .vscode-high-contrast .secondary, .vscode-high-contrast-light .secondary { border-color: var(--ink); }
@@ -168,12 +197,12 @@ export function renderCommitSurface(options: CommitSurfaceOptions): string {
   </header>
   <main data-mode="${mode}">
     <h1>${title}</h1>
-    <p class="intro">${mode === "preview" ? "Revise, ajuste ou gere uma nova versão." : mode === "editor" ? "Ajuste o texto. A versão final será copiada para você." : `${drafts.length} repositórios. Revise e copie cada mensagem.`}</p>
+    <p class="intro">${mode === "preview" ? "Revise, ajuste ou gere uma nova versão." : mode === "editor" ? options.session ? "Revise o texto antes de copiar ou usar no Git." : "Ajuste o texto. A versão final será copiada para você." : `${drafts.length} repositórios. Revise e copie cada mensagem.`}</p>
     ${content}
     <p class="footnote">Você decide quando fazer o commit.</p>
   </main>
   <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
+    ${options.session ? sessionScript : `const vscode = acquireVsCodeApi();
     const mode = document.querySelector('main').dataset.mode;
     const send = (action, message = '') => vscode.postMessage({ action, message });
     document.getElementById('close').addEventListener('click', () => send(mode === 'multi' ? 'close' : 'cancel'));
@@ -244,7 +273,7 @@ export function renderCommitSurface(options: CommitSurfaceOptions): string {
     });
     const initialFocus = document.querySelector('textarea') || document.getElementById('copy');
     initialFocus?.focus();
-    if (initialFocus?.tagName === 'TEXTAREA') initialFocus.setSelectionRange(initialFocus.value.length, initialFocus.value.length);
+    if (initialFocus?.tagName === 'TEXTAREA') initialFocus.setSelectionRange(initialFocus.value.length, initialFocus.value.length);`}
   </script>
 </body>
 </html>`;

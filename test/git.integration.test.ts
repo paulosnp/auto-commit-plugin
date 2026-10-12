@@ -8,6 +8,7 @@ import { CavemanCommitError } from "../src/errors";
 import { discoverRepositories } from "../src/git/getRepository";
 import {
   getLocalChangesDiff,
+  getChangesDiff,
   isLargeDiff,
 } from "../src/git/gitClient";
 import { runProcess } from "../src/process/runProcess";
@@ -86,6 +87,41 @@ test("mapeia Git inexistente ao obter alterações locais", async () => {
     (error: unknown) =>
       error instanceof CavemanCommitError && error.code === "GIT_NOT_FOUND",
   );
+});
+
+test("escopos respeitam arquivo parcialmente staged, untracked e index intacto", async () => {
+  const repository = await createRepository();
+  try {
+    await writeFile(join(repository, "partial.txt"), "base\n");
+    await git(repository, ["add", "partial.txt"]);
+    await git(repository, ["commit", "-m", "chore: criar base"]);
+    await writeFile(join(repository, "partial.txt"), "base\nindex-only\n");
+    await git(repository, ["add", "partial.txt"]);
+    await writeFile(join(repository, "partial.txt"), "base\nindex-only\nworktree-only\n");
+    await writeFile(join(repository, "new.txt"), "untracked-only\n");
+    const before = await git(repository, ["diff", "--cached"]);
+    const staged = await getChangesDiff(runProcess, repository, "staged");
+    const all = await getChangesDiff(runProcess, repository, "all");
+    assert.match(staged, /\+index-only/);
+    assert.doesNotMatch(staged, /worktree-only|untracked-only|new\.txt/);
+    assert.match(all, /\+index-only/); assert.match(all, /\+worktree-only/); assert.match(all, /\+untracked-only/);
+    assert.equal(await git(repository, ["diff", "--cached"]), before);
+  } finally { await rm(repository, { recursive: true, force: true }); }
+});
+
+test("ambos os escopos funcionam sem primeiro commit", async () => {
+  const repository = await createRepository();
+  try {
+    assert.equal(await getChangesDiff(runProcess, repository, "staged"), "");
+    await writeFile(join(repository, "first.txt"), "index-only\n");
+    await git(repository, ["add", "first.txt"]);
+    await writeFile(join(repository, "first.txt"), "index-only\nworktree-only\n");
+    await writeFile(join(repository, "new.txt"), "untracked-only\n");
+    const staged = await getChangesDiff(runProcess, repository, "staged");
+    const all = await getChangesDiff(runProcess, repository, "all");
+    assert.match(staged, /index-only/); assert.doesNotMatch(staged, /worktree-only|untracked-only/);
+    assert.match(all, /index-only/); assert.match(all, /worktree-only/); assert.match(all, /untracked-only/);
+  } finally { await rm(repository, { recursive: true, force: true }); }
 });
 
 test("detecta repositórios em workspace multi-root sem tocar projeto atual", async () => {

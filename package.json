@@ -2,7 +2,7 @@
   "name": "caveman-commit",
   "displayName": "Caveman Commit",
   "description": "Gera e copia mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "publisher": "PauloooSNP",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -60,6 +60,15 @@
       {
         "command": "cavemanCommit.openSettings",
         "title": "Caveman Commit: Open Settings"
+      },
+      {
+        "command": "cavemanCommit.selectChanges",
+        "title": "Caveman Commit: Select Changes"
+      },
+      {
+        "command": "cavemanCommit.generateFromScm",
+        "title": "Caveman Commit: Generate Commit for Repository",
+        "icon": "$(caveman-commit)"
       }
     ],
     "configuration": {
@@ -104,8 +113,30 @@
           "default": 500000,
           "minimum": 1000,
           "description": "Tamanho em bytes que exige confirmação antes do envio integral das alterações locais."
+        },
+        "cavemanCommit.diffScope": {
+          "type": "string",
+          "enum": [
+            "all",
+            "staged"
+          ],
+          "default": "all",
+          "enumDescriptions": [
+            "Staged, unstaged e untracked.",
+            "Somente alterações no index."
+          ],
+          "description": "Escopo enviado à IA para gerar a mensagem de commit."
         }
       }
+    },
+    "menus": {
+      "scm/title": [
+        {
+          "command": "cavemanCommit.generateFromScm",
+          "when": "scmProvider == git",
+          "group": "navigation@10"
+        }
+      ]
     }
   },
   "scripts": {

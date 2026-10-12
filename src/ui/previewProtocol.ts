@@ -11,6 +11,22 @@ export interface RepositoryCopyMessage {
   readonly message: string;
 }
 
+export interface SessionMessage {
+  readonly action: "copy" | "useGit" | "regenerate" | "edit" | "cancel" | "close";
+  readonly index: number;
+  readonly message: string;
+  readonly allowStale: boolean;
+}
+
+export function parseSessionMessage(value: unknown): SessionMessage | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const data = value as Record<string, unknown>;
+  if (!["copy", "useGit", "regenerate", "edit", "cancel", "close"].includes(data.action as string)
+    || typeof data.index !== "number" || !Number.isSafeInteger(data.index) || data.index < 0
+    || typeof data.message !== "string" || typeof data.allowStale !== "boolean") return undefined;
+  return data as unknown as SessionMessage;
+}
+
 export function parsePreviewMessage(value: unknown): PreviewResult | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;

@@ -4,6 +4,8 @@ import test, { mock } from "node:test";
 import type { ExtensionContext } from "vscode";
 import type * as Extension from "../src/extension";
 import { CavemanCommitError } from "../src/errors";
+import type { CommitDraft } from "../src/services/commitSession";
+import type { CommitSessionActions } from "../src/ui/commitPreview";
 
 class TokenSource {
   private readonly listeners = new Set<() => void>();
@@ -24,16 +26,18 @@ class TokenSource {
 const state = {
   providerCalls: 0, logins: 0, processing: 0, diff: "diff-test",
   failure: undefined as Error | undefined,
-  previewAction: "cancel", copies: [] as string[],
+  previewAction: "cancel", copies: [] as string[], drafts: [] as CommitDraft[],
+  native: [] as { rootUri: { fsPath: string }; inputBox: { value: string } }[],
+  selected: 0, revealed: 0,
 };
-const commands = new Map<string, () => unknown>();
+const commands = new Map<string, (context?: unknown) => unknown>();
 const disposable = { dispose() {} };
 const uri = (fsPath: string) => ({ fsPath });
 const vscodeStub = {
   CancellationTokenSource: TokenSource,
   ProgressLocation: { Notification: 1 },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => uri([base.fsPath, ...parts].join("/")) },
-  extensions: { getExtension: () => ({ isActive: true, exports: { getAPI: () => ({ repositories: [] }) } }) },
+  extensions: { getExtension: () => ({ isActive: true, exports: { getAPI: () => ({ repositories: state.native }) } }) },
   workspace: {
     fs: { createDirectory: async () => undefined },
     onDidChangeConfiguration: () => disposable,
@@ -46,11 +50,12 @@ const vscodeStub = {
     showErrorMessage: () => new Promise(() => {}),
     showWarningMessage: () => new Promise(() => {}),
     showInformationMessage: () => new Promise(() => {}),
+    showQuickPick: async (items: unknown[]) => { state.selected += 1; return items[items.length - 1]; },
   },
   env: { clipboard: { writeText: async (value: string) => { state.copies.push(value); } } },
   commands: {
-    registerCommand: (name: string, handler: () => unknown) => { commands.set(name, handler); return disposable; },
-    executeCommand: (name: string) => commands.get(name)?.(),
+    registerCommand: (name: string, handler: (context?: unknown) => unknown) => { commands.set(name, handler); return disposable; },
+    executeCommand: async (name: string) => { if (name === "workbench.view.scm") state.revealed += 1; return commands.get(name)?.(); },
   },
 };
 class Provider {
@@ -63,13 +68,16 @@ class Provider {
 }
 const dependencies: Record<string, unknown> = {
   vscode: vscodeStub,
-  "./config/settings": { readSettings: () => ({ provider: "claude", model: "claude-sonnet-5", reasoningEffort: "medium", timeout: 60000, maxDiffSize: 500000, skillPath: "skill" }) },
-  "./git/getRepository": { normalizeRepositories: () => [{ name: "repo", path: "/repo" }] },
-  "./git/gitClient": { getLocalChangesDiff: async () => state.diff, diffSizeInBytes: () => 100, isLargeDiff: () => false },
+  "./config/settings": { readSettings: () => ({ diffScope: "all", provider: "claude", model: "claude-sonnet-5", reasoningEffort: "medium", timeout: 60000, maxDiffSize: 500000, skillPath: "skill" }) },
+  "./git/getRepository": { normalizeRepositories: () => state.native.length ? state.native.map(repository => ({ name: repository.rootUri.fsPath, path: repository.rootUri.fsPath })) : [{ name: "repo", path: "/repo" }] },
+  "./git/gitClient": { getChangesDiff: async () => state.diff, diffSizeInBytes: () => 100, isLargeDiff: () => false },
   "./providers/claude": { ClaudeProvider: Provider },
   "./providers/codex": { CodexProvider: Provider },
   "./skills/loader": { loadSkill: async () => "skill" },
-  "./ui/commitPreview": { showCommitPreview: async () => ({ action: state.previewAction }) },
+  "./ui/commitPreview": { showCommitSession: async (_uri: unknown, drafts: CommitDraft[], actions: CommitSessionActions) => {
+    state.drafts = drafts;
+    if (state.previewAction === "copy" || state.previewAction === "useGit") await actions.act(drafts[0]!, state.previewAction, drafts[0]!.message, false);
+  } },
   "./ui/claudeLogin": { ClaudeLogin: class { public async open(): Promise<void> { state.logins += 1; } public dispose(): void {} } },
   "./ui/statusBar": { CavemanStatusBar: class { public update(): void {} public setProcessing(): void { state.processing += 1; } public dispose(): void {} } },
 };
@@ -83,7 +91,7 @@ loadMock.mock.restore();
 function setup(): () => void {
   state.providerCalls = 0; state.logins = 0; state.processing = 0;
   state.diff = "diff-test"; state.failure = undefined;
-  state.previewAction = "cancel"; state.copies = [];
+  state.previewAction = "cancel"; state.copies = []; state.native = []; state.drafts = []; state.selected = 0; state.revealed = 0;
   commands.clear();
   const context = { subscriptions: [] as { dispose(): void }[], globalStorageUri: uri("/storage"), extensionUri: uri("/extension"), extensionPath: "/extension" };
   extension.activate(context as unknown as ExtensionContext);
@@ -125,9 +133,39 @@ test("notificações de erro comum, ausência de diff e cópia não bloqueiam a 
     state.previewAction = "copy";
     await click();
     await click();
-    assert.equal(state.providerCalls, 3);
+    assert.equal(state.providerCalls, 2);
     assert.equal(state.copies.length, 4);
     assert.equal(state.logins, 0);
+  } finally { cleanup(); }
+});
+
+test("SCM usa o repositório do contexto e revela Git sem abrir terminal", async () => {
+  const cleanup = setup();
+  try {
+    state.native = ["/api", "/web"].map(fsPath => ({ rootUri: { fsPath }, inputBox: { value: "" } }));
+    state.previewAction = "useGit";
+    await commands.get("cavemanCommit.generateFromScm")?.({ rootUri: { fsPath: "/api" } });
+    assert.equal(state.drafts.length, 1);
+    assert.equal(state.drafts[0]!.repositoryPath, "/api");
+    assert.equal(state.native[0]!.inputBox.value, "fix(auth): corrigir token");
+    assert.equal(state.native[1]!.inputBox.value, "");
+    assert.equal(state.selected, 0);
+    assert.equal(state.revealed, 1);
+    assert.equal(state.logins, 0);
+  } finally { cleanup(); }
+});
+
+test("SCM sem contexto em multi-root abre seletor; Git indisponível mantém cópia", async () => {
+  const cleanup = setup();
+  try {
+    state.native = ["/api", "/web"].map(fsPath => ({ rootUri: { fsPath }, inputBox: { value: "" } }));
+    await commands.get("cavemanCommit.generateFromScm")?.();
+    assert.equal(state.selected, 1);
+    assert.equal(state.drafts[0]!.repositoryPath, "/web");
+    state.native = [];
+    await click();
+    assert.equal(state.drafts[0]!.canUseGit, false);
+    assert.equal(state.copies.length, 2);
   } finally { cleanup(); }
 });
 

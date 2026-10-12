@@ -8,6 +8,19 @@ export interface GitClientOptions {
   readonly cancellation?: CancellationLike;
 }
 
+export type DiffScope = "all" | "staged";
+
+export function getChangesDiff(
+  run: ProcessRunner,
+  repositoryPath: string,
+  scope: DiffScope,
+  options: GitClientOptions = {},
+): Promise<string> {
+  return scope === "staged"
+    ? getStagedDiff(run, repositoryPath, options)
+    : getLocalChangesDiff(run, repositoryPath, options);
+}
+
 const DEFAULT_GIT_TIMEOUT = 30_000;
 
 function gitError(code: string, message: string, stderr: string): CavemanCommitError {

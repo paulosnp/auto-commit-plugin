@@ -39,3 +39,18 @@ são gerados por `npm run build:icons`. Monocromático, sem gradiente ou sombra.
 Ctrl/Cmd+Enter aplica/copia; Escape fecha. Botões respeitam estado pendente.
 Conteúdo externo é escapado antes de entrar em HTML. CSP restringe scripts e estilos
 ao nonce da webview. Transições de 160 ms; desativadas em movimento reduzido.
+
+Cada mensagem exibe escopo (`Todas as alterações` ou `Somente staged`) e
+provider/modelo. Acerto de cache mostra `Mensagem reutilizada`. A indicação
+`Copiada` só aparece após cópia confirmada; resultado desatualizado aguarda revisão.
+
+Preview, editor e cada repositório oferecem `Usar no Git` e `Regenerar`.
+Git nativo indisponível mantém a ação desabilitada com explicação visível.
+Aviso inline de diff alterado preserva a mensagem e oferece regeneração ou uso
+explícito do texto anterior para a ação solicitada. Nenhum envio automático nesse estado.
+
+Operações pendentes bloqueiam os controles do repositório e anunciam progresso
+em região `aria-live`. Falhas preservam textarea e painel. Atualização de um
+repositório no editor múltiplo não reconstrói os demais editores nem perde edições.
+Preencher Git ou copiar fecha a superfície individual; no editor múltiplo,
+confirma a ação no repositório correspondente e mantém o painel aberto.

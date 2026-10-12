@@ -3,8 +3,9 @@ import * as vscode from "vscode";
 
 import { asUserMessage } from "../errors";
 import { validateCommitMessage } from "../services/responseValidator";
+import type { CommitDraft, DraftAction, DraftActionResult } from "../services/commitSession";
 import { renderCommitSurface, type CommitSurfaceOptions } from "./commitSurface";
-import { parsePreviewMessage, parseRepositoryCopyMessage, type PreviewResult } from "./previewProtocol";
+import { parsePreviewMessage, parseRepositoryCopyMessage, parseSessionMessage, type PreviewResult } from "./previewProtocol";
 
 export interface RepositoryCommitDraft {
   readonly repositoryName: string;
@@ -14,7 +15,7 @@ export interface RepositoryCommitDraft {
 
 function createSurface(
   extensionUri: vscode.Uri,
-  options: Pick<CommitSurfaceOptions, "mode" | "drafts" | "provider" | "model">,
+  options: Pick<CommitSurfaceOptions, "mode" | "drafts" | "provider" | "model" | "session">,
 ): vscode.WebviewPanel {
   const media = vscode.Uri.joinPath(extensionUri, "media");
   const panel = vscode.window.createWebviewPanel(
@@ -34,6 +35,69 @@ function createSurface(
     cspSource: panel.webview.cspSource,
   });
   return panel;
+}
+
+export interface CommitSessionActions {
+  act(draft: CommitDraft, action: DraftAction, text: string, allowStale: boolean): Promise<DraftActionResult>;
+  regenerate(draft: CommitDraft): Promise<CommitDraft>;
+  reportError(error: unknown): void;
+  cancel(): void;
+}
+
+export function showCommitSession(
+  extensionUri: vscode.Uri,
+  initialDrafts: readonly CommitDraft[],
+  actions: CommitSessionActions,
+  cancellation: vscode.CancellationToken,
+): Promise<void> {
+  if (cancellation.isCancellationRequested || initialDrafts.length === 0) return Promise.resolve();
+  const drafts = [...initialDrafts];
+  let mode: CommitSurfaceOptions["mode"] = drafts.length > 1 ? "multi" : "preview";
+  const first = drafts[0]!;
+  const panel = createSurface(extensionUri, { mode, drafts, provider: first.provider, model: first.model, session: true });
+  let closed = false;
+  panel.onDidDispose(() => { closed = true; actions.cancel(); });
+  const render = (): void => {
+    panel.webview.html = renderCommitSurface({
+      mode, drafts, provider: drafts[0]!.provider, model: drafts[0]!.model, session: true,
+      nonce: randomBytes(16).toString("hex"), cspSource: panel.webview.cspSource,
+      iconUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "status-icon.svg")).toString(),
+    });
+  };
+  // One action at a time: generation owns the shared progress/cancellation state.
+  let pending = false;
+  return waitForSurface<void>(panel, cancellation, undefined, (value, finish) => {
+    const result = parseSessionMessage(value);
+    if (!result) return;
+    if (result.action === "close" || result.action === "cancel") { finish(undefined); return; }
+    const original = drafts[result.index];
+    if (!original || pending) {
+      if (original) void panel.webview.postMessage({ action: "sessionResult", index: result.index, outcome: "error", message: "Aguarde a operação em andamento." });
+      return;
+    }
+    if (result.action === "edit") { if (mode === "preview") { mode = "editor"; render(); } return; }
+    pending = true;
+    const action = result.action;
+    void (async () => {
+      if (action === "regenerate") {
+        const updated = await actions.regenerate(original);
+        if (closed || cancellation.isCancellationRequested) return;
+        drafts[result.index] = updated;
+        if (mode !== "multi") render();
+        else await panel.webview.postMessage({ action: "sessionResult", index: result.index, outcome: "updated", draft: updated });
+        return;
+      }
+      const outcome = await actions.act(original, action, mode === "preview" ? original.message : result.message, result.allowStale);
+      if (closed || cancellation.isCancellationRequested) return;
+      drafts[result.index] = outcome.draft;
+      if (mode !== "multi" && (outcome.outcome === "copied" || outcome.outcome === "applied")) finish(undefined);
+      else await panel.webview.postMessage({ action: "sessionResult", index: result.index, ...outcome });
+    })().catch((error: unknown) => {
+      if (closed || cancellation.isCancellationRequested) return;
+      actions.reportError(error);
+      void panel.webview.postMessage({ action: "sessionResult", index: result.index, outcome: "error", message: asUserMessage(error) });
+    }).finally(() => { pending = false; });
+  });
 }
 
 function waitForSurface<T>(

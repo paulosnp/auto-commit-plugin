@@ -10,9 +10,9 @@ feat(usuarios): adicionar filtro por secretaria
 
 ## O que faz
 
-- Analisa alterações `staged`, `unstaged` e arquivos `untracked` não ignorados.
-- Gera a mensagem e já deixa na área de transferência.
-- Abre um preview com ações para copiar, editar ou regenerar.
+- Analisa todas as alterações ou somente `staged`, conforme o escopo escolhido.
+- Copia automaticamente a mensagem individual quando o diff continua atualizado.
+- Preview com edição, regeneração, cópia e preenchimento do campo de commit no Git.
 - Interface discreta, inspirada no ChatGPT para Windows, acompanha o tema do VS Code.
 - Resposta vazia ou fora do formato: refaz automaticamente até validar, usando
   o motivo da rejeição e a resposta anterior para corrigir a próxima tentativa.
@@ -39,9 +39,9 @@ Passos:
 
 1. Faça as alterações; `git add` não é necessário.
 2. Clique em `Caveman Commit` na Status Bar.
-3. Aguarde a geração: a mensagem já estará na área de transferência.
-4. Revise a mensagem no preview; edite, regenere ou feche quando terminar.
-5. Cole com `Ctrl+V` onde quiser.
+3. Aguarde a geração: a mensagem individual atualizada já estará na área de transferência.
+4. Revise o preview; edite, regenere ou selecione **Usar no Git**.
+5. Faça o commit quando decidir, pelo fluxo Git de sua preferência.
 
 Um novo clique durante a execução cancela o fluxo atual e inicia outra geração.
 Notificações abertas não bloqueiam novos cliques na barra de status.
@@ -76,6 +76,8 @@ Nenhuma publicação é feita automaticamente.
 | Comando | O que faz |
 | --- | --- |
 | `Caveman Commit: Generate Commit` | Gera a mensagem do repositório atual |
+| `Caveman Commit: Generate Commit for Repository` | Gera somente para o repositório recebido do Source Control; sem contexto claro, abre seletor |
+| `Caveman Commit: Select Changes` | Escolhe todas as alterações ou somente staged; também disponível no hover da barra |
 | `Caveman Commit: Select Provider` | Alterna entre Codex e Claude Code |
 | `Caveman Commit: Select Model` | Restaura o modelo padrão ou aceita um identificador explícito |
 | `Caveman Commit: Open Settings` | Abre as configurações da extensão |
@@ -98,6 +100,7 @@ Não há fallback automático: modelo indisponível produz erro explícito.
 | Chave | Padrão | Efeito |
 | --- | --- | --- |
 | `cavemanCommit.provider` | `codex` | CLI usado para gerar mensagens (`codex` ou `claude`) |
+| `cavemanCommit.diffScope` | `all` | `all`: staged, unstaged e untracked; `staged`: somente index |
 | `cavemanCommit.model` | `""` | Identificador do modelo; vazio usa o padrão do provider |
 | `cavemanCommit.reasoningEffort` | `medium` | Reasoning effort do Codex; a extensão exige `medium` |
 | `cavemanCommit.skillPath` | `skills/caveman-commit/SKILL.md` | Caminho absoluto ou relativo à instalação da extensão para a skill |
@@ -107,6 +110,7 @@ Não há fallback automático: modelo indisponível produz erro explícito.
 ```json
 {
   "cavemanCommit.provider": "codex",
+  "cavemanCommit.diffScope": "all",
   "cavemanCommit.model": "",
   "cavemanCommit.reasoningEffort": "medium",
   "cavemanCommit.skillPath": "skills/caveman-commit/SKILL.md",
@@ -122,8 +126,46 @@ identificador do provider anterior seja reutilizado.
 
 - Somente repositórios com alterações são processados.
 - Um repositório alterado: preview da mensagem, com edição e regeneração.
-- Dois ou mais: editor completo com mensagem editável e botão de cópia por
-  repositório.
+- Dois ou mais: editor com cópia, **Usar no Git** e regeneração por repositório.
+  Copiar ou preencher o Git confirma o resultado no próprio editor, que permanece aberto.
+- O botão Caveman Commit no cabeçalho do Source Control gera somente para o
+  repositório daquele painel. Sem contexto inequívoco, permite escolher o repositório.
+
+## Diff atualizado e mensagens reutilizadas
+
+O preview mostra o escopo enviado. `staged` considera a versão no index, inclusive
+em arquivos parcialmente staged; `all` mantém o comportamento de analisar as
+alterações locais, incluindo arquivos novos não ignorados. Escopo vazio avisa e
+não chama a IA. Funciona também antes do primeiro commit.
+
+**Regenerar** relê diff, configurações e conteúdo da skill, sempre chama a IA e
+só substitui o resultado anterior após sucesso. Também funciona em cada repositório
+do editor múltiplo. Falhas e cancelamentos preservam a mensagem anterior.
+
+Cada resultado registra repositório, escopo e hash do diff enviado. A extensão
+relê esse diff após gerar e antes de copiar ou preencher o Git. Se houver mudanças,
+preserva o texto e mostra um aviso: regenere ou escolha explicitamente copiar/usar
+a mensagem anterior. Resposta desatualizada não é copiada automaticamente.
+
+Até **20 resultados** ficam em cache na memória da sessão. Um clique normal
+reutiliza mensagem válida para o mesmo repositório, escopo, diff, provider, modelo,
+effort e conteúdo da skill, indicando **Mensagem reutilizada**. Resultados mais
+recentemente usados são mantidos; recarregar/fechar a extensão limpa o cache.
+Edições válidas copiadas ou aplicadas ao Git atualizam a entrada quando o diff
+continua correspondente. Mensagens desatualizadas não são gravadas no cache.
+
+## Usar no Git
+
+**Usar no Git** preenche apenas o campo de commit do repositório exato pela API
+da extensão nativa `vscode.git`. Texto vazio ou idêntico dispensa confirmação;
+texto diferente exige **Substituir** ou **Cancelar**. Se o campo mudar durante a
+confirmação, a operação é interrompida para preservar a nova edição.
+
+Após sucesso, o Source Control é revelado. Preview/editor individual fecha;
+editor múltiplo permanece aberto com confirmação por repositório. Erros mantêm
+o painel e seu texto. Com Git nativo indisponível, a ação fica desabilitada com
+explicação; geração e cópia continuam funcionando. Nenhum stage, commit ou push
+é executado.
 
 ## Segurança
 

@@ -15,7 +15,7 @@ import {
 } from "./git/getRepository";
 import {
   diffSizeInBytes,
-  getLocalChangesDiff,
+  getChangesDiff,
   isLargeDiff,
 } from "./git/gitClient";
 import { runProcess } from "./process/runProcess";
@@ -25,20 +25,17 @@ import { CodexProvider } from "./providers/codex";
 import type { CommitProvider, ProviderLogger } from "./providers/provider";
 import { generateCommitMessage } from "./services/commitGenerator";
 import { RestartableOperation } from "./services/restartableOperation";
-import { validateCommitMessage } from "./services/responseValidator";
+import { CommitCache, CommitSession, repositoryKey, type CommitDraft } from "./services/commitSession";
+import { cancellable, checkCancellation } from "./services/cancellation";
+import { writeScmMessage } from "./services/scmWriter";
 import { loadSkill } from "./skills/loader";
 import { copyCommitMessage } from "./ui/clipboard";
 import { ClaudeLogin } from "./ui/claudeLogin";
-import {
-  showCommitEditor,
-  showCommitPreview,
-  showMultiCommitEditor,
-  type RepositoryCommitDraft,
-} from "./ui/commitPreview";
+import { showCommitSession } from "./ui/commitPreview";
 import { CavemanStatusBar } from "./ui/statusBar";
 
 interface GitApi {
-  readonly repositories: readonly NativeGitRepository[];
+  readonly repositories: readonly (NativeGitRepository & { readonly inputBox?: { value: string } })[];
 }
 
 interface GitExtensionExports {
@@ -54,13 +51,21 @@ class OutputLogger implements ProviderLogger {
   }
 }
 
+async function nativeGitRepositories(): Promise<GitApi["repositories"]> {
+  try {
+    const extension = vscode.extensions.getExtension<GitExtensionExports>("vscode.git");
+    if (extension === undefined) return [];
+    const exports = extension.isActive ? extension.exports : await extension.activate();
+    return exports.getAPI(1).repositories;
+  } catch { return []; }
+}
+
 async function repositoriesFromVsCodeGit(): Promise<RepositoryInfo[]> {
-  const extension = vscode.extensions.getExtension<GitExtensionExports>("vscode.git");
-  if (extension === undefined) {
-    return [];
-  }
-  const exports = extension.isActive ? extension.exports : await extension.activate();
-  return normalizeRepositories(exports.getAPI(1).repositories);
+  return normalizeRepositories(await nativeGitRepositories());
+}
+
+async function gitRepository(path: string): Promise<GitApi["repositories"][number] | undefined> {
+  return (await nativeGitRepositories()).find(repository => repositoryKey(repository.rootUri.fsPath) === repositoryKey(path));
 }
 
 async function getAvailableRepositories(): Promise<RepositoryInfo[]> {
@@ -88,7 +93,7 @@ async function selectProvider(statusBar: CavemanStatusBar): Promise<void> {
   await config.update("provider", selected.provider, target);
   await config.update("model", "", target);
   const settings = readSettings();
-  statusBar.update(settings.provider, settings.model, settings.reasoningEffort);
+  statusBar.update(settings.provider, settings.model, settings.reasoningEffort, settings.diffScope);
 }
 
 async function selectModel(statusBar: CavemanStatusBar): Promise<void> {
@@ -129,7 +134,7 @@ async function selectModel(statusBar: CavemanStatusBar): Promise<void> {
     .getConfiguration("cavemanCommit")
     .update("model", value, configurationTarget());
   const updated = readSettings();
-  statusBar.update(updated.provider, updated.model, updated.reasoningEffort);
+  statusBar.update(updated.provider, updated.model, updated.reasoningEffort, updated.diffScope);
 }
 
 function providerFor(
@@ -203,8 +208,19 @@ async function createMessage(
       },
     );
   } finally {
-    statusBar.update(settings.provider, settings.model, settings.reasoningEffort);
+    statusBar.update(settings.provider, settings.model, settings.reasoningEffort, settings.diffScope);
   }
+}
+
+async function selectChanges(statusBar: CavemanStatusBar): Promise<void> {
+  const selected = await vscode.window.showQuickPick([
+    { label: "Todas as alterações", description: "Staged, unstaged e untracked", scope: "all" as const },
+    { label: "Somente staged", description: "Apenas alterações no index", scope: "staged" as const },
+  ], { title: "Caveman Commit · Alterações", placeHolder: "Escolha o escopo do diff" });
+  if (!selected) return;
+  await vscode.workspace.getConfiguration("cavemanCommit").update("diffScope", selected.scope, configurationTarget());
+  const settings = readSettings();
+  statusBar.update(settings.provider, settings.model, settings.reasoningEffort, settings.diffScope);
 }
 
 async function generateAndCopy(
@@ -212,181 +228,88 @@ async function generateAndCopy(
   statusBar: CavemanStatusBar,
   providers: Readonly<Record<ProviderId, CommitProvider>>,
   logger: OutputLogger,
-  cancellation: vscode.CancellationToken,
+  parentCancellation: vscode.CancellationToken,
+  cache: CommitCache,
+  targetPath: string | undefined,
+  reportError: (error: unknown) => void,
 ): Promise<void> {
-  const settings = readSettings();
-  const repositories = await getAvailableRepositories();
-  if (repositories.length === 0) {
-    throw new CavemanCommitError(
-      "NO_REPOSITORY",
-      "Nenhum repositório Git disponível.",
-    );
-  }
-
-  const changes = (
-    await Promise.all(
-      repositories.map(async (repository) => {
-        const diff = await getLocalChangesDiff(runProcess, repository.path, {
-          cancellation,
-        });
-        return { repository, diff, bytes: diffSizeInBytes(diff) };
-      }),
-    )
-  ).filter(({ diff }) => diff.trim().length > 0);
-  if (cancellation.isCancellationRequested) {
-    throw new CavemanCommitError("OPERATION_CANCELLED", "Operação cancelada.");
-  }
-  if (changes.length === 0) {
-    void vscode.window.showWarningMessage(
-      "Nenhuma alteração local encontrada para gerar a mensagem.",
-    );
-    return;
-  }
-
-  const largeChanges = changes.filter(({ diff }) =>
-    isLargeDiff(diff, settings.maxDiffSize),
-  );
-  if (largeChanges.length > 0) {
-    const scope =
-      largeChanges.length === 1
-        ? `O repositório ${largeChanges[0]?.repository.name ?? "selecionado"} possui alterações locais de tamanho elevado`
-        : `${largeChanges.length} repositórios possuem alterações locais de tamanho elevado`;
-    const decision = await vscode.window.showWarningMessage(
-      `${scope} e podem aumentar significativamente o processamento. Continuar mesmo assim?`,
-      { modal: true },
-      "Continuar",
-      "Cancelar",
-    );
-    if (decision !== "Continuar") {
-      return;
-    }
-  }
-
-  const skill = await loadSkill(context.extensionPath, settings.skillPath);
-  const providerWorkingDirectory = vscode.Uri.joinPath(
-    context.globalStorageUri,
-    "provider-workspace",
-  );
-  await vscode.workspace.fs.createDirectory(providerWorkingDirectory);
-  const provider = providerFor(settings.provider, providers);
-  logger.log(`Provider: ${settings.provider}.`);
-  logger.log(`Modelo: ${settings.model}.`);
-  logger.log(`Prazo inicial por tentativa: ${settings.timeout / 1_000}s.`);
-  if (settings.provider === "codex") {
-    logger.log(`Reasoning effort: ${settings.reasoningEffort}.`);
-  }
-  for (const change of changes) {
-    logger.log(`Repositório: ${change.repository.path}.`);
-    logger.log(`Alterações locais: ${change.bytes} bytes.`);
-  }
-  logger.log(
-    changes.length === 1
-      ? "Geração iniciada."
-      : `Geração iniciada para ${changes.length} repositórios.`,
-  );
-
-  const providerLabel = settings.provider === "codex" ? "Codex" : "Claude Code";
-  if (changes.length > 1) {
-    const drafts: RepositoryCommitDraft[] = [];
-    for (const change of changes) {
-      if (cancellation.isCancellationRequested) {
-        throw new CavemanCommitError("OPERATION_CANCELLED", "Operação cancelada.");
-      }
-      const message = await createMessage(
-        provider,
-        settings,
-        providerWorkingDirectory.fsPath,
-        skill,
-        change.diff,
-        statusBar,
-        cancellation,
-        logger,
-      );
-      drafts.push({
-        repositoryName: change.repository.name,
-        repositoryPath: change.repository.path,
-        message,
-      });
-      logger.log(`Mensagem gerada para ${change.repository.path}.`);
-    }
-    await showMultiCommitEditor(
-      context.extensionUri,
-      drafts,
-      providerLabel,
-      settings.model,
-      async (draft) => {
-        const message = validateCommitMessage(draft.message).message;
-        await copyCommitMessage(vscode.env.clipboard, message);
-        logger.log(`Mensagem de ${draft.repositoryPath} copiada.`);
+  const source = new vscode.CancellationTokenSource();
+  const registration = parentCancellation.onCancellationRequested(() => source.cancel());
+  if (parentCancellation.isCancellationRequested) source.cancel();
+  const cancellation = source.token;
+  try {
+    const available = await getAvailableRepositories();
+    const repositories = targetPath === undefined ? available : available.filter(repository => repositoryKey(repository.path) === repositoryKey(targetPath));
+    if (!repositories.length) throw new CavemanCommitError("NO_REPOSITORY", "Nenhum repositório Git disponível.");
+    const session = new CommitSession(cache, {
+      cancellation,
+      readContext: async () => {
+        const settings = readSettings();
+        return { settings, skill: await loadSkill(context.extensionPath, settings.skillPath) };
       },
-      cancellation,
-    );
-    return;
-  }
-
-  const change = changes[0];
-  if (change === undefined) {
-    return;
-  }
-  let message = await createMessage(
-    provider,
-    settings,
-    providerWorkingDirectory.fsPath,
-    skill,
-    change.diff,
-    statusBar,
-    cancellation,
-    logger,
-  );
-  await copyCommitMessage(vscode.env.clipboard, message);
-  logger.log("Mensagem gerada e copiada para a área de transferência.");
-  for (;;) {
-    const preview = await showCommitPreview(
-      context.extensionUri,
-      message,
-      providerLabel,
-      settings.model,
-      cancellation,
-    );
-    if (preview.action === "cancel") {
-      logger.log("Popup fechado; mensagem permanece na área de transferência.");
+      readDiff: (path, scope) => getChangesDiff(runProcess, path, scope, { cancellation }),
+      generate: async ({ settings, skill }, diff) => {
+        const cwd = vscode.Uri.joinPath(context.globalStorageUri, "provider-workspace");
+        await vscode.workspace.fs.createDirectory(cwd);
+        logger.log(`Provider: ${settings.provider}; modelo: ${settings.model}; effort: ${settings.reasoningEffort}; escopo: ${settings.diffScope}; diff: ${diffSizeInBytes(diff)} bytes.`);
+        return createMessage(providerFor(settings.provider, providers), settings, cwd.fsPath, skill, diff, statusBar, cancellation, logger);
+      },
+      confirmLargeDiff: async (repository, diff, { settings }) => {
+        if (!isLargeDiff(diff, settings.maxDiffSize)) return true;
+        const decision = await cancellable(vscode.window.showWarningMessage(
+          `${repository.name}: diff elevado. O processamento pode demorar. Continuar mesmo assim?`,
+          { modal: true }, "Continuar", "Cancelar",
+        ), cancellation);
+        return decision === "Continuar";
+      },
+      canUseGit: async path => typeof (await gitRepository(path))?.inputBox?.value === "string",
+      copy: message => copyCommitMessage(vscode.env.clipboard, message),
+      apply: async (path, message, ensureCurrent) => {
+        const repository = await gitRepository(path);
+        if (!repository?.inputBox) throw new CavemanCommitError("SCM_UNAVAILABLE", "Git nativo indisponível para este repositório. Copie a mensagem ou habilite a extensão Git do VS Code.");
+        const applied = await writeScmMessage(repository.inputBox, message, async () => {
+          const decision = await vscode.window.showWarningMessage(
+            "O campo de commit já contém outro texto. Substituir?", { modal: true }, "Substituir", "Cancelar",
+          );
+          return decision === "Substituir";
+        }, ensureCurrent, cancellation);
+        if (applied) void Promise.resolve(vscode.commands.executeCommand("workbench.view.scm")).catch(() => undefined);
+        return applied;
+      },
+    });
+    const drafts: CommitDraft[] = [];
+    for (const repository of repositories) {
+      try {
+        const draft = await session.prepare(repository);
+        drafts.push(draft);
+        logger.log(`${draft.reused ? "Mensagem reutilizada" : "Mensagem gerada"}: ${repository.path}; escopo: ${draft.scope}; hash: ${draft.diffHash}${draft.stale ? "; diff alterado" : ""}.`);
+      } catch (error) {
+        if (!(error instanceof CavemanCommitError && error.code === "NO_CHANGES")) throw error;
+      }
+    }
+    checkCancellation(cancellation);
+    if (!drafts.length) {
+      void vscode.window.showWarningMessage("Nenhuma alteração encontrada no escopo selecionado.");
       return;
     }
-    if (preview.action === "copy") {
-      await copyCommitMessage(vscode.env.clipboard, message);
-      void vscode.window.showInformationMessage(
-        "Mensagem de commit copiada para a área de transferência.",
-      );
-      return;
-    }
-    if (preview.action === "regenerate") {
-      logger.log("Regeneração iniciada.");
-      message = await createMessage(
-        provider,
-        settings,
-        providerWorkingDirectory.fsPath,
-        skill,
-        change.diff,
-        statusBar,
-        cancellation,
-        logger,
-      );
-      await copyCommitMessage(vscode.env.clipboard, message);
-      logger.log("Nova mensagem copiada para a área de transferência.");
-      continue;
-    }
-    const edited = await showCommitEditor(
-      context.extensionUri,
-      message,
-      providerLabel,
-      settings.model,
-      cancellation,
-    );
-    if (edited !== undefined) {
-      message = validateCommitMessage(edited).message;
-      await copyCommitMessage(vscode.env.clipboard, message);
-      logger.log("Mensagem editada e copiada para a área de transferência.");
-    }
+    const autoCopy = async (draft: CommitDraft): Promise<CommitDraft> => {
+      if (draft.stale) return draft;
+      return (await session.act(draft, "copy", draft.message)).draft;
+    };
+    if (drafts.length === 1) drafts[0] = await autoCopy(drafts[0]!);
+    await showCommitSession(context.extensionUri, drafts, {
+      act: (draft, action, text, allowStale) => session.act(draft, action, text, allowStale),
+      regenerate: async draft => {
+        const updated = await session.prepare({ name: draft.repositoryName, path: draft.repositoryPath }, true);
+        return drafts.length === 1 ? autoCopy(updated) : updated;
+      },
+      reportError,
+      cancel: () => source.cancel(),
+    }, cancellation);
+  } finally {
+    source.cancel();
+    registration.dispose();
+    source.dispose();
   }
 }
 
@@ -405,7 +328,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshStatus = (): void => {
     try {
       const settings = readSettings();
-      statusBar.update(settings.provider, settings.model, settings.reasoningEffort);
+      statusBar.update(settings.provider, settings.model, settings.reasoningEffort, settings.diffScope);
     } catch (error) {
       logger.log(`Configuração inválida: ${asUserMessage(error)}`);
     }
@@ -425,9 +348,16 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  const cache = new CommitCache();
+  let requestedPath: string | undefined;
+  const reportError = (error: unknown): void => {
+    logger.log(`Erro: ${asUserMessage(error)}`);
+    if (error instanceof CavemanCommitError && error.code === "CLAUDE_NOT_AUTHENTICATED") void openClaudeLogin();
+  };
   const generation = new RestartableOperation(
     () => new vscode.CancellationTokenSource(),
     async (cancellation) => {
+      const targetPath = requestedPath;
       statusBar.setProcessing();
       try {
         await generateAndCopy(
@@ -436,6 +366,9 @@ export function activate(context: vscode.ExtensionContext): void {
           providers,
           logger,
           cancellation,
+          cache,
+          targetPath,
+          reportError,
         );
       } catch (error) {
         const message = asUserMessage(error);
@@ -465,10 +398,31 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     login,
     generation,
+    { dispose: () => cache.clear() },
     vscode.commands.registerCommand("cavemanCommit.generateCommit", () => {
       logger.log("Solicitação de geração recebida.");
+      requestedPath = undefined;
       return generation.trigger();
     }),
+    vscode.commands.registerCommand("cavemanCommit.generateFromScm", async (context: unknown) => {
+      const repositories = await getAvailableRepositories();
+      if (!repositories.length) {
+        void vscode.window.showWarningMessage("Nenhum repositório Git disponível.");
+        return;
+      }
+      const rootUri = typeof context === "object" && context !== null && "rootUri" in context
+        ? (context as { rootUri?: { fsPath?: unknown } }).rootUri : undefined;
+      const path = typeof rootUri?.fsPath === "string" ? rootUri.fsPath : undefined;
+      let selected = path === undefined ? undefined : repositories.find(repository => repositoryKey(repository.path) === repositoryKey(path));
+      if (!selected) {
+        if (repositories.length === 1) selected = repositories[0];
+        else selected = (await vscode.window.showQuickPick(repositories.map(repository => ({ label: repository.name, description: repository.path, repository })), { title: "Caveman Commit · Repositório" }))?.repository;
+      }
+      if (!selected) return;
+      requestedPath = selected.path;
+      return generation.trigger();
+    }),
+    vscode.commands.registerCommand("cavemanCommit.selectChanges", () => selectChanges(statusBar)),
     vscode.commands.registerCommand("cavemanCommit.loginClaude", openClaudeLogin),
     vscode.commands.registerCommand("cavemanCommit.selectProvider", () =>
       selectProvider(statusBar),

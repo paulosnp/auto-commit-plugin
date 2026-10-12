@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 
 import { CavemanCommitError } from "../errors";
+import type { DiffScope } from "../git/gitClient";
 import {
   getEffectiveModel,
   isProviderId,
@@ -8,6 +9,7 @@ import {
 } from "./models";
 
 export interface CavemanSettings {
+  readonly diffScope: DiffScope;
   readonly provider: ProviderId;
   readonly model: string;
   readonly reasoningEffort: "medium";
@@ -32,7 +34,12 @@ export function readSettings(): CavemanSettings {
   }
 
   const modelOverride = config.get<string>("model", "");
+  const diffScope = config.get<string>("diffScope", "all");
+  if (diffScope !== "all" && diffScope !== "staged") {
+    throw new CavemanCommitError("INVALID_DIFF_SCOPE", "Escopo inválido. Use all ou staged.");
+  }
   return {
+    diffScope,
     provider: rawProvider,
     model: getEffectiveModel(rawProvider, modelOverride),
     reasoningEffort,
