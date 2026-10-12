@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, statSync } from "node:fs";
 import { delimiter, dirname, extname, resolve, sep } from "node:path";
 
 import { CavemanCommitError } from "../errors";
@@ -9,6 +9,16 @@ export interface ResolvedCommand {
 }
 
 type Environment = Readonly<Record<string, string | undefined>>;
+
+export function isExecutableFile(path: string, platform: NodeJS.Platform = process.platform): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, platform === "win32" ? constants.F_OK : constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function pathValue(environment: Environment): string {
   return environment.PATH ?? environment.Path ?? environment.path ?? "";
@@ -33,9 +43,19 @@ function findWindowsCommand(
   command: string,
   environment: Environment,
 ): string | undefined {
-  return windowsCandidates(command, environment).find((candidate) =>
-    existsSync(candidate),
-  );
+  return windowsCandidates(command, environment).find((candidate) => isExecutableFile(candidate, "win32"));
+}
+
+export function findCommand(
+  command: string,
+  environment: Environment = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform === "win32") return findWindowsCommand(command, environment);
+  if (command.includes("/")) return isExecutableFile(command, platform) ? resolve(command) : undefined;
+  return pathValue(environment).split(":").filter(Boolean)
+    .map((directory) => resolve(directory, command))
+    .find((candidate) => isExecutableFile(candidate, platform));
 }
 
 function npmShimScript(shimPath: string): string | undefined {

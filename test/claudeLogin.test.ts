@@ -3,6 +3,7 @@ import Module, { createRequire } from "node:module";
 import test, { mock } from "node:test";
 import type { TerminalOptions, Uri } from "vscode";
 import type * as LoginUi from "../src/ui/claudeLogin";
+import type { ProviderExecutableResolver } from "../src/process/providerExecutable";
 
 class Terminal {
   public exitStatus: { code: number } | undefined;
@@ -14,12 +15,14 @@ class Terminal {
 const terminals: { options: TerminalOptions; terminal: Terminal }[] = [];
 const closeListeners = new Set<(terminal: Terminal) => void>();
 let directoryFailure = false;
+let executablePath = "C:/Program Files/nodejs/node.exe";
+const resolveExecutable: ProviderExecutableResolver = (provider) => {
+  assert.equal(provider, "claude");
+  return { command: executablePath, prefixArgs: ["C:/CLI with spaces/claude.js"], source: "PATH" };
+};
 const moduleLoader = Module as unknown as { _load(request: string, parent: unknown, isMain: boolean): unknown };
 const originalLoad = moduleLoader._load;
 const loadMock = mock.method(moduleLoader, "_load", (request: string, parent: unknown, isMain: boolean) => {
-  if (request === "../process/resolveCommand") {
-    return { resolveCommand: () => ({ command: "C:/Program Files/nodejs/node.exe", prefixArgs: ["C:/CLI with spaces/claude.js"] }) };
-  }
   if (request !== "vscode") return originalLoad.call(moduleLoader, request, parent, isMain);
   return {
     ThemeIcon: class { public constructor(public readonly id: string) {} },
@@ -40,7 +43,7 @@ const cwd = { fsPath: "/isolated/login" } as Uri;
 
 test("login executa CLI diretamente, preserva argumentos e reutiliza terminal ativo", async () => {
   terminals.length = 0;
-  const login = new ClaudeLogin(cwd);
+  const login = new ClaudeLogin(cwd, resolveExecutable);
   try {
     await Promise.all([login.open(), login.open()]);
     assert.equal(terminals.length, 1);
@@ -58,7 +61,7 @@ test("login executa CLI diretamente, preserva argumentos e reutiliza terminal at
 
 test("login concluído ou terminal fechado permite abrir nova sessão", async () => {
   terminals.length = 0;
-  const login = new ClaudeLogin(cwd);
+  const login = new ClaudeLogin(cwd, resolveExecutable);
   try {
     await login.open();
     terminals[0]!.terminal.exitStatus = { code: 0 };
@@ -75,7 +78,7 @@ test("login concluído ou terminal fechado permite abrir nova sessão", async ()
 
 test("falha de storage não prende próxima tentativa de login", async () => {
   terminals.length = 0;
-  const login = new ClaudeLogin(cwd);
+  const login = new ClaudeLogin(cwd, resolveExecutable);
   try {
     directoryFailure = true;
     await assert.rejects(login.open(), /Storage indisponível/);
@@ -88,11 +91,44 @@ test("falha de storage não prende próxima tentativa de login", async () => {
 
 test("dispose durante abertura pendente não deixa terminal órfão", async () => {
   terminals.length = 0;
-  const login = new ClaudeLogin(cwd);
+  const login = new ClaudeLogin(cwd, resolveExecutable);
   const pending = login.open();
   login.dispose();
   await pending;
   await login.open();
   assert.equal(terminals.length, 0);
   assert.equal(closeListeners.size, 0);
+});
+
+test("login usa resolução compartilhada e reconsulta executável após fechar terminal", async () => {
+  terminals.length = 0;
+  const login = new ClaudeLogin(cwd, (provider) => ({
+    ...resolveExecutable(provider), prefixArgs: [], source: "anthropic.claude-code",
+  }));
+  try {
+    executablePath = "C:/Extension v1/resources/native-binary/claude.exe";
+    await login.open();
+    assert.equal(terminals[0]!.options.shellPath, executablePath);
+    assert.deepEqual(terminals[0]!.options.shellArgs, ["auth", "login"]);
+    closeListeners.forEach((listener) => listener(terminals[0]!.terminal));
+    executablePath = "C:/Extension v2/resources/native-binary/claude.exe";
+    await login.open();
+    assert.equal(terminals[1]!.options.shellPath, executablePath);
+  } finally { executablePath = "C:/Program Files/nodejs/node.exe"; login.dispose(); }
+});
+
+test("falha na resolução do login não abre terminal nem bloqueia nova tentativa", async () => {
+  terminals.length = 0;
+  let unavailable = true;
+  const login = new ClaudeLogin(cwd, (provider) => {
+    if (unavailable) throw new Error("Executável ausente");
+    return resolveExecutable(provider);
+  });
+  try {
+    await assert.rejects(login.open(), /Executável ausente/);
+    assert.equal(terminals.length, 0);
+    unavailable = false;
+    await login.open();
+    assert.equal(terminals.length, 1);
+  } finally { login.dispose(); }
 });

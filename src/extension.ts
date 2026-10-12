@@ -19,6 +19,7 @@ import {
   isLargeDiff,
 } from "./git/gitClient";
 import { runProcess } from "./process/runProcess";
+import { resolveProviderExecutable, type ProviderExecutableResolver } from "./process/providerExecutable";
 import { ClaudeProvider } from "./providers/claude";
 import { CodexProvider } from "./providers/codex";
 import type { CommitProvider, ProviderLogger } from "./providers/provider";
@@ -393,10 +394,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const channel = vscode.window.createOutputChannel("Caveman Commit");
   const logger = new OutputLogger(channel);
   const statusBar = new CavemanStatusBar();
-  const login = new ClaudeLogin(vscode.Uri.joinPath(context.globalStorageUri, "login"));
+  const resolveExecutable: ProviderExecutableResolver = (provider) =>
+    resolveProviderExecutable(provider, (id) => vscode.extensions.getExtension(id));
+  const login = new ClaudeLogin(vscode.Uri.joinPath(context.globalStorageUri, "login"), resolveExecutable);
   const providers: Readonly<Record<ProviderId, CommitProvider>> = {
-    codex: new CodexProvider({ run: runProcess, logger }),
-    claude: new ClaudeProvider({ run: runProcess, logger }),
+    codex: new CodexProvider({ run: runProcess, logger, resolveExecutable }),
+    claude: new ClaudeProvider({ run: runProcess, logger, resolveExecutable }),
   };
 
   const refreshStatus = (): void => {

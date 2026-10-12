@@ -31,7 +31,9 @@ Pré-requisitos:
 
 - VS Code 1.94 ou superior
 - Git no `PATH`
-- Codex CLI e/ou Claude Code CLI já instalado e autenticado
+- Codex CLI ou Claude Code CLI instalado no `PATH`, **ou** extensão correspondente
+  (`openai.chatgpt` / `anthropic.claude-code`) com executável embutido compatível.
+  A autenticação do provider continua necessária.
 
 Passos:
 
@@ -43,6 +45,15 @@ Passos:
 
 Um novo clique durante a execução cancela o fluxo atual e inicia outra geração.
 Notificações abertas não bloqueiam novos cliques na barra de status.
+
+A extensão procura primeiro o CLI no `PATH`. Se ausente, usa o executável
+embutido na extensão correspondente, sem abrir seu painel, terminal ou console.
+O diretório é consultado novamente a cada geração para acompanhar atualizações.
+Somente o login, quando necessário, abre terminal integrado e navegador.
+Falhas de autenticação ou geração não provocam troca automática de instalação.
+Layouts internos desconhecidos ou incompatíveis produzem orientação para instalar
+o CLI separado. Em SSH/containers, o executável precisa estar disponível no host
+onde a Caveman Commit está executando.
 
 Se a sessão do Claude estiver ausente ou expirada, a extensão abre automaticamente
 um terminal integrado executando `claude auth login`. Conclua a autenticação no
@@ -129,6 +140,7 @@ identificador do provider anterior seja reutilizado.
 
 | Sintoma | Causa / ação |
 | --- | --- |
+| Executável não encontrado | Instale o CLI no `PATH` ou a extensão correspondente com binário compatível; CLI separado é opcional quando o binário embutido está disponível |
 | Erro citando o modelo | Modelo indisponível no provider; não há fallback — ajuste `Select Model` |
 | Geração interrompida | Novo clique durante a execução cancela o fluxo anterior |
 | Pedido de confirmação antes de enviar | Diff acima de `cavemanCommit.maxDiffSize` |
@@ -136,7 +148,7 @@ identificador do provider anterior seja reutilizado.
 | Autenticação do Claude ausente, inválida ou expirada | O login abre no terminal integrado; autentique no navegador e clique novamente na extensão |
 
 Abra `Output → Caveman Commit` para ver provider, modelo, repositório, tamanho do
-diff, duração e exit code. O diff completo nunca aparece nos logs.
+diff, origem/versão do executável, duração e exit code. O diff completo nunca aparece nos logs.
 
 ## Desenvolvimento
 

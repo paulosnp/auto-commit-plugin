@@ -4,7 +4,7 @@ import {
   conciseCliFailure,
   looksLikeAuthenticationError,
   looksLikeUnavailableModel,
-  verifyCli,
+  prepareProviderCli,
 } from "./helpers";
 import type {
   CommitGenerationOptions,
@@ -14,7 +14,6 @@ import type {
 
 export class CodexProvider implements CommitProvider {
   public readonly id = "codex" as const;
-  private verified = false;
 
   public constructor(private readonly dependencies: ProviderDependencies) {}
 
@@ -28,17 +27,7 @@ export class CodexProvider implements CommitProvider {
         "Reasoning effort inválido. Use medium.",
       );
     }
-    if (!this.verified) {
-      await verifyCli(
-        this.dependencies.run,
-        "codex",
-        options.cwd,
-        options.timeoutMs,
-        "Codex CLI não foi encontrado no PATH.",
-        options.cancellation,
-      );
-      this.verified = true;
-    }
+    const run = await prepareProviderCli(this.dependencies, this.id, options);
 
     const args = [
       "exec",
@@ -57,7 +46,7 @@ export class CodexProvider implements CommitProvider {
       "-",
     ];
     const startedAt = Date.now();
-    const result = await this.dependencies.run("codex", args, {
+    const result = await run("codex", args, {
       cwd: options.cwd,
       input: prompt,
       timeoutMs: options.timeoutMs,

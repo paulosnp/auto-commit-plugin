@@ -1,4 +1,5 @@
 import type { CancellationLike, ProcessRunner } from "../process/runProcess";
+import type { ProviderExecutableResolver } from "../process/providerExecutable";
 
 export interface CommitGenerationOptions {
   readonly model: string;
@@ -22,5 +23,6 @@ export interface CommitProvider {
 
 export interface ProviderDependencies {
   readonly run: ProcessRunner;
+  readonly resolveExecutable?: ProviderExecutableResolver;
   readonly logger?: ProviderLogger;
 }

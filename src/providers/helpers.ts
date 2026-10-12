@@ -1,5 +1,25 @@
 import { CavemanCommitError } from "../errors";
 import type { CancellationLike, ProcessRunner } from "../process/runProcess";
+import type { ProviderId } from "../config/models";
+import { missingProviderMessage } from "../process/providerExecutable";
+import type { CommitGenerationOptions, ProviderDependencies } from "./provider";
+
+export async function prepareProviderCli(
+  dependencies: ProviderDependencies,
+  provider: ProviderId,
+  options: CommitGenerationOptions,
+): Promise<ProcessRunner> {
+  const executable = dependencies.resolveExecutable?.(provider) ?? {
+    command: provider, prefixArgs: [], source: "PATH",
+  };
+  // Keep version verification and generation on the same executable; never retry on another source.
+  const run: ProcessRunner = (_command, args, processOptions) =>
+    dependencies.run(executable.command, [...executable.prefixArgs, ...args], processOptions);
+  const version = await verifyCli(run, provider, options.cwd, options.timeoutMs,
+    missingProviderMessage(provider), options.cancellation);
+  dependencies.logger?.log(`Executável ${provider}: ${executable.source}; versão ${version}.`);
+  return run;
+}
 
 export async function verifyCli(
   run: ProcessRunner,
@@ -8,7 +28,7 @@ export async function verifyCli(
   timeoutMs: number,
   notFoundMessage: string,
   cancellation?: CancellationLike,
-): Promise<void> {
+): Promise<string> {
   try {
     const result = await run(command, ["--version"], {
       cwd,
@@ -18,6 +38,7 @@ export async function verifyCli(
     if (result.exitCode !== 0) {
       throw new CavemanCommitError("CLI_CHECK_FAILED", notFoundMessage);
     }
+    return result.stdout.match(/\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?/)?.[0] ?? "desconhecida";
   } catch (error) {
     if (error instanceof CavemanCommitError && error.code !== "PROCESS_NOT_FOUND") {
       throw error;

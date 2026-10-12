@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
+import childProcess, { type SpawnOptions } from "node:child_process";
 
 import { CavemanCommitError } from "../src/errors";
 import {
@@ -64,4 +65,16 @@ test("runner identifica executável inexistente", async () => {
     (error: unknown) =>
       error instanceof CavemanCommitError && error.code === "PROCESS_NOT_FOUND",
   );
+});
+
+test("geração roda sem shell e sem abrir janela de console", async () => {
+  const spawn = mock.method(childProcess, "spawn");
+  try {
+    await runProcess(process.execPath, ["-e", "process.stdout.write('ok')"], { timeoutMs: 5_000 });
+    assert.equal(spawn.mock.calls.length, 1);
+    const options = spawn.mock.calls[0]!.arguments[2] as SpawnOptions;
+    assert.equal(options.shell, false);
+    assert.equal(options.windowsHide, true);
+    assert.deepEqual(options.stdio, ["pipe", "pipe", "pipe"]);
+  } finally { spawn.mock.restore(); }
 });

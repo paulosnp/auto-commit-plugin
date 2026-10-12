@@ -9,6 +9,7 @@ import type {
 } from "../src/process/runProcess";
 import { ClaudeProvider } from "../src/providers/claude";
 import { CodexProvider } from "../src/providers/codex";
+import { missingProviderMessage } from "../src/process/providerExecutable";
 
 interface Invocation {
   readonly command: string;
@@ -136,7 +137,7 @@ test("mapeia CLI inexistente", async () => {
     new CodexProvider({ run: missing }).generateCommit("prompt", options),
     (error: unknown) =>
       error instanceof CavemanCommitError &&
-      error.userMessage === "Codex CLI não foi encontrado no PATH.",
+      error.userMessage === missingProviderMessage("codex"),
   );
   await assert.rejects(
     new ClaudeProvider({ run: missing }).generateCommit("prompt", {
@@ -145,7 +146,7 @@ test("mapeia CLI inexistente", async () => {
     }),
     (error: unknown) =>
       error instanceof CavemanCommitError &&
-      error.userMessage === "Claude Code CLI não foi encontrado no PATH.",
+      error.userMessage === missingProviderMessage("claude"),
   );
 });
 
@@ -246,5 +247,64 @@ test("propaga timeout e cancelamento do runner", async () => {
       (error: unknown) =>
         error instanceof CavemanCommitError && error.code === code,
     );
+  }
+});
+
+test("providers usam executável resolvido e reconsultam origem em cada geração", async () => {
+  for (const Provider of [CodexProvider, ClaudeProvider]) {
+    const invocations: Invocation[] = [];
+    const logs: string[] = [];
+    let resolutions = 0;
+    const provider = new Provider({
+      run: scriptedRunner([
+        { stdout: "cli 1.2.3-alpha.4", stderr: "", exitCode: 0 },
+        { stdout: "fix(cli): corrigir conexão", stderr: "", exitCode: 0 },
+        { stdout: "cli 2.0.0", stderr: "", exitCode: 0 },
+        { stdout: "fix(cli): corrigir conexão", stderr: "", exitCode: 0 },
+      ], invocations),
+      resolveExecutable: (id) => {
+        assert.ok(["codex", "claude"].includes(id));
+        resolutions += 1;
+        return { command: `C:/Extension v${resolutions}/node.exe`, prefixArgs: ["C:/CLI with spaces/main.js"], source: "extension-test" };
+      },
+      logger: { log: (message) => logs.push(message) },
+    });
+    await provider.generateCommit("PROMPT PRIVADO", options);
+    await provider.generateCommit("PROMPT PRIVADO", options);
+    assert.equal(resolutions, 2);
+    assert.deepEqual(invocations.map((call) => call.command), [
+      "C:/Extension v1/node.exe", "C:/Extension v1/node.exe",
+      "C:/Extension v2/node.exe", "C:/Extension v2/node.exe",
+    ]);
+    assert.deepEqual(invocations[0]!.args, ["C:/CLI with spaces/main.js", "--version"]);
+    assert.equal(invocations[1]!.args[0], "C:/CLI with spaces/main.js");
+    assert.match(logs.join("\n"), /extension-test; versão 1\.2\.3-alpha\.4/);
+    assert.match(logs.join("\n"), /versão 2\.0\.0/);
+    assert.ok(!logs.join("\n").includes("PROMPT PRIVADO"));
+  }
+});
+
+test("falha de geração ou autenticação não troca executável selecionado", async () => {
+  for (const code of ["CLAUDE_NOT_AUTHENTICATED", "CLAUDE_FAILED", "PROCESS_TIMEOUT", "OPERATION_CANCELLED"]) {
+    let resolutions = 0;
+    let calls = 0;
+    const provider = new ClaudeProvider({
+      resolveExecutable: () => {
+        resolutions += 1;
+        assert.equal(resolutions, 1, "Não procurar outra instalação após falha");
+        return { command: "/extension/claude", prefixArgs: [], source: "anthropic.claude-code" };
+      },
+      run: async (command) => {
+        assert.equal(command, "/extension/claude");
+        calls += 1;
+        if (calls === 1) return { stdout: "2.1.296", stderr: "", exitCode: 0 };
+        if (code === "PROCESS_TIMEOUT" || code === "OPERATION_CANCELLED") throw new CavemanCommitError(code, code);
+        return { stdout: "", stderr: code === "CLAUDE_NOT_AUTHENTICATED" ? "Not logged in" : "Failure", exitCode: 1 };
+      },
+    });
+    await assert.rejects(provider.generateCommit("PROMPT", options),
+      (error: unknown) => error instanceof CavemanCommitError && error.code === code);
+    assert.equal(calls, 2);
+    assert.equal(resolutions, 1);
   }
 });

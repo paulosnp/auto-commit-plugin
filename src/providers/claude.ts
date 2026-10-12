@@ -4,7 +4,7 @@ import {
   conciseCliFailure,
   looksLikeAuthenticationError,
   looksLikeUnavailableModel,
-  verifyCli,
+  prepareProviderCli,
 } from "./helpers";
 import type {
   CommitGenerationOptions,
@@ -14,7 +14,6 @@ import type {
 
 export class ClaudeProvider implements CommitProvider {
   public readonly id = "claude" as const;
-  private verified = false;
 
   public constructor(private readonly dependencies: ProviderDependencies) {}
 
@@ -22,17 +21,7 @@ export class ClaudeProvider implements CommitProvider {
     prompt: string,
     options: CommitGenerationOptions,
   ): Promise<string> {
-    if (!this.verified) {
-      await verifyCli(
-        this.dependencies.run,
-        "claude",
-        options.cwd,
-        options.timeoutMs,
-        "Claude Code CLI não foi encontrado no PATH.",
-        options.cancellation,
-      );
-      this.verified = true;
-    }
+    const run = await prepareProviderCli(this.dependencies, this.id, options);
 
     const args = [
       "--print",
@@ -51,7 +40,7 @@ export class ClaudeProvider implements CommitProvider {
       "text",
     ];
     const startedAt = Date.now();
-    const result = await this.dependencies.run("claude", args, {
+    const result = await run("claude", args, {
       cwd: options.cwd,
       input: prompt,
       timeoutMs: options.timeoutMs,

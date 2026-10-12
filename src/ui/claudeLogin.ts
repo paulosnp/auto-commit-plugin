@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
-import { resolveCommand } from "../process/resolveCommand";
+import type { ProviderExecutableResolver } from "../process/providerExecutable";
 
 export class ClaudeLogin implements vscode.Disposable {
   private terminal: vscode.Terminal | undefined;
   private disposed = false;
   private readonly closeRegistration: vscode.Disposable;
 
-  public constructor(private readonly cwd: vscode.Uri) {
+  public constructor(private readonly cwd: vscode.Uri, private readonly resolveExecutable: ProviderExecutableResolver) {
     this.closeRegistration = vscode.window.onDidCloseTerminal((terminal) => {
       if (terminal === this.terminal) this.terminal = undefined;
     });
@@ -17,7 +17,7 @@ export class ClaudeLogin implements vscode.Disposable {
     await vscode.workspace.fs.createDirectory(this.cwd);
     // Concurrent requests share a single interactive login.
     if (this.disposed || this.focusActiveTerminal()) return;
-    const resolved = resolveCommand("claude");
+    const resolved = this.resolveExecutable("claude");
     this.terminal = vscode.window.createTerminal({
       name: "Caveman Commit · Login Claude",
       shellPath: resolved.command,
