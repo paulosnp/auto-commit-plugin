@@ -45,6 +45,9 @@ test("prompt contém pt-BR, skill, diff e proibição de ferramentas", () => {
   assert.match(prompt, /diff --git a\/auth\.ts b\/auth\.ts/);
   assert.match(prompt, /Não execute Git, shell, ferramentas/);
   assert.match(prompt, /feat\(auth\): adicionar validação do token/);
+  assert.match(prompt, /72 caracteres.*não termine com ponto/);
+  assert.match(prompt, /Separe subject e body com uma linha vazia/);
+  assert.match(prompt, /4000 caracteres/);
   assert.doesNotMatch(prompt, /tentativa anterior/);
 });
 

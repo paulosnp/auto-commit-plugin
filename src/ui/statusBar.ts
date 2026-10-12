@@ -7,6 +7,7 @@ const HOVER_COMMANDS = [
   "cavemanCommit.selectProvider",
   "cavemanCommit.selectModel",
   "cavemanCommit.openSettings",
+  "cavemanCommit.loginClaude",
 ] as const;
 
 function escapeMarkdownCell(value: string): string {
@@ -24,36 +25,32 @@ function buildTooltip(
   const providerLabel = provider === "codex" ? "Codex" : "Claude Code";
   const tooltip = new vscode.MarkdownString(undefined, true);
   tooltip.isTrusted = { enabledCommands: HOVER_COMMANDS };
-  tooltip.appendMarkdown("### $(caveman-commit) Caveman Commit\n\n");
+  tooltip.appendMarkdown("$(caveman-commit) **Caveman Commit**\n\n");
   tooltip.appendMarkdown(
     processing
-      ? "$(sync~spin) **Gerando mensagem de commit…** Clique novamente para reiniciar.\n\n"
-      : "$(check) **Pronto para gerar e copiar**\n\n",
+      ? "Gerando mensagem… Clique para reiniciar.\n\n"
+      : "Gerar e copiar mensagem de commit.\n\n",
   );
-  tooltip.appendMarkdown("---\n\n");
-  tooltip.appendMarkdown("| Configuração | Valor |\n| :-- | --: |\n");
-  tooltip.appendMarkdown(
-    `| Provider | **${escapeMarkdownCell(providerLabel)}** |\n`,
-  );
-  tooltip.appendMarkdown(`| Modelo | ${escapeMarkdownCell(model)} |\n`);
+  tooltip.appendMarkdown(`${escapeMarkdownCell(providerLabel)} · ${escapeMarkdownCell(model)}`);
   if (provider === "codex") {
     tooltip.appendMarkdown(
-      `| Reasoning | ${escapeMarkdownCell(reasoningEffort)} |\n`,
+      ` · ${escapeMarkdownCell(reasoningEffort)}`,
     );
   }
-  tooltip.appendMarkdown("\n$(files) Analisa alterações locais sem executar `git add`.\n\n");
-  tooltip.appendMarkdown("$(clippy) Copia o resultado automaticamente para `Ctrl+V`.\n\n");
-  tooltip.appendMarkdown("---\n\n");
+  tooltip.appendMarkdown("\n\n---\n\n");
   tooltip.appendMarkdown(
-    "[$(sparkle) **Gerar mensagem**](command:cavemanCommit.generateCommit)\n\n",
+    "[Gerar mensagem](command:cavemanCommit.generateCommit)\n\n",
   );
   tooltip.appendMarkdown(
-    "[$(account) Trocar provider](command:cavemanCommit.selectProvider) · " +
-      "[$(settings-gear) Trocar modelo](command:cavemanCommit.selectModel)\n\n",
+    "[Provider](command:cavemanCommit.selectProvider) · " +
+      "[Modelo](command:cavemanCommit.selectModel)\n\n",
   );
   tooltip.appendMarkdown(
-    "[$(gear) Abrir configurações](command:cavemanCommit.openSettings)",
+    "[Configurações](command:cavemanCommit.openSettings)",
   );
+  if (provider === "claude") {
+    tooltip.appendMarkdown("\n\n[Entrar no Claude](command:cavemanCommit.loginClaude)");
+  }
   return tooltip;
 }
 
@@ -82,7 +79,7 @@ export class CavemanStatusBar implements vscode.Disposable {
 
   public setProcessing(): void {
     this.item.text =
-      "$(caveman-commit-ring~spin)$(caveman-commit-center) Caveman Commit";
+      "$(loading~spin) Caveman Commit";
     this.item.tooltip = buildTooltip(
       this.provider,
       this.model,

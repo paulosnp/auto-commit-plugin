@@ -12,7 +12,12 @@ feat(usuarios): adicionar filtro por secretaria
 
 - Analisa alterações `staged`, `unstaged` e arquivos `untracked` não ignorados.
 - Gera a mensagem e já deixa na área de transferência.
-- Mostra um popup para fechar, editar ou regenerar.
+- Abre um preview com ações para copiar, editar ou regenerar.
+- Interface discreta, inspirada no ChatGPT para Windows, acompanha o tema do VS Code.
+- Resposta vazia ou fora do formato: refaz automaticamente até validar, usando
+  o motivo da rejeição e a resposta anterior para corrigir a próxima tentativa.
+  Timeout: refaz até duas vezes, dobrando o prazo até 600 segundos por tentativa.
+  Cancelamento, falhas do CLI e esgotamento das retentativas interrompem a geração.
 
 ## O que não faz
 
@@ -31,12 +36,18 @@ Pré-requisitos:
 Passos:
 
 1. Faça as alterações; `git add` não é necessário.
-2. Clique em `Caveman · Terra` ou `Caveman · Sonnet` na Status Bar.
+2. Clique em `Caveman Commit` na Status Bar.
 3. Aguarde a geração: a mensagem já estará na área de transferência.
-4. Use o popup compacto para fechar, editar ou regenerar.
+4. Revise a mensagem no preview; edite, regenere ou feche quando terminar.
 5. Cole com `Ctrl+V` onde quiser.
 
 Um novo clique durante a execução cancela o fluxo atual e inicia outra geração.
+Notificações abertas não bloqueiam novos cliques na barra de status.
+
+Se a sessão do Claude estiver ausente ou expirada, a extensão abre automaticamente
+um terminal integrado executando `claude auth login`. Conclua a autenticação no
+navegador e clique novamente em `Caveman Commit`. Também é possível abrir o login
+pela Command Palette (`Caveman Commit: Login Claude Code`) ou pelo hover da barra.
 
 ## Instalação
 
@@ -57,6 +68,7 @@ Nenhuma publicação é feita automaticamente.
 | `Caveman Commit: Select Provider` | Alterna entre Codex e Claude Code |
 | `Caveman Commit: Select Model` | Restaura o modelo padrão ou aceita um identificador explícito |
 | `Caveman Commit: Open Settings` | Abre as configurações da extensão |
+| `Caveman Commit: Login Claude Code` | Abre o login do Claude no terminal integrado |
 
 Configurações são gravadas no workspace quando ele existe; caso contrário,
 globalmente.
@@ -66,7 +78,7 @@ globalmente.
 | Provider | Modelo | Observação |
 | --- | --- | --- |
 | Codex | `gpt-5.6-terra` (GPT-5.6 Terra) | reasoning effort `medium` |
-| Claude Code | `claude-sonnet-5` (Claude Sonnet 5) | — |
+| Claude Code | `claude-sonnet-5` (Claude Sonnet 5) | effort `low`; system prompt dedicado à mensagem de commit |
 
 Não há fallback automático: modelo indisponível produz erro explícito.
 
@@ -78,7 +90,7 @@ Não há fallback automático: modelo indisponível produz erro explícito.
 | `cavemanCommit.model` | `""` | Identificador do modelo; vazio usa o padrão do provider |
 | `cavemanCommit.reasoningEffort` | `medium` | Reasoning effort do Codex; a extensão exige `medium` |
 | `cavemanCommit.skillPath` | `skills/caveman-commit/SKILL.md` | Caminho absoluto ou relativo à instalação da extensão para a skill |
-| `cavemanCommit.timeout` | `60000` | Tempo limite da geração, em milissegundos (1000–600000) |
+| `cavemanCommit.timeout` | `120000` | Prazo inicial por tentativa, em milissegundos (1000–600000); timeout dobra o prazo em até duas retentativas |
 | `cavemanCommit.maxDiffSize` | `500000` | Tamanho em bytes que exige confirmação antes do envio integral das alterações |
 
 ```json
@@ -87,7 +99,7 @@ Não há fallback automático: modelo indisponível produz erro explícito.
   "cavemanCommit.model": "",
   "cavemanCommit.reasoningEffort": "medium",
   "cavemanCommit.skillPath": "skills/caveman-commit/SKILL.md",
-  "cavemanCommit.timeout": 60000,
+  "cavemanCommit.timeout": 120000,
   "cavemanCommit.maxDiffSize": 500000
 }
 ```
@@ -98,7 +110,7 @@ identificador do provider anterior seja reutilizado.
 ## Vários repositórios no workspace
 
 - Somente repositórios com alterações são processados.
-- Um repositório alterado: popup compacto, igual ao fluxo normal.
+- Um repositório alterado: preview da mensagem, com edição e regeneração.
 - Dois ou mais: editor completo com mensagem editável e botão de cópia por
   repositório.
 
@@ -120,7 +132,8 @@ identificador do provider anterior seja reutilizado.
 | Erro citando o modelo | Modelo indisponível no provider; não há fallback — ajuste `Select Model` |
 | Geração interrompida | Novo clique durante a execução cancela o fluxo anterior |
 | Pedido de confirmação antes de enviar | Diff acima de `cavemanCommit.maxDiffSize` |
-| Geração expira | Aumente `cavemanCommit.timeout` (padrão 60s) |
+| Geração expira | Padrão 120s; até duas retentativas com prazo crescente. Se persistir, verifique conexão/CLI e ajuste `cavemanCommit.timeout` |
+| Autenticação do Claude ausente, inválida ou expirada | O login abre no terminal integrado; autentique no navegador e clique novamente na extensão |
 
 Abra `Output → Caveman Commit` para ver provider, modelo, repositório, tamanho do
 diff, duração e exit code. O diff completo nunca aparece nos logs.
@@ -131,6 +144,9 @@ diff, duração e exit code. O diff completo nunca aparece nos logs.
 npm install
 npm run check
 ```
+
+`npm run build:icons` regenera SVGs, PNGs e a fonte da barra de status a partir de
+`media/status-icon.svg`.
 
 `npm run check` roda typecheck, lint, testes e build. Pressione `F5` no VS Code
 para abrir o Extension Development Host.

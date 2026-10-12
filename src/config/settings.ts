@@ -40,7 +40,7 @@ export function readSettings(): CavemanSettings {
       "skillPath",
       "skills/caveman-commit/SKILL.md",
     ),
-    timeout: config.get<number>("timeout", 60_000),
+    timeout: config.get<number>("timeout", 120_000),
     maxDiffSize: config.get<number>("maxDiffSize", 500_000),
   };
 }

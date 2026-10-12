@@ -2,8 +2,8 @@
   "name": "caveman-commit",
   "displayName": "Caveman Commit",
   "description": "Gera e copia mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
-  "version": "0.5.1",
-  "publisher": "local",
+  "version": "0.5.3",
+  "publisher": "PauloooSNP",
   "icon": "media/icon.png",
   "license": "MIT",
   "engines": {
@@ -25,6 +25,7 @@
     "onCommand:cavemanCommit.selectProvider",
     "onCommand:cavemanCommit.selectModel",
     "onCommand:cavemanCommit.openSettings",
+    "onCommand:cavemanCommit.loginClaude",
     "onStartupFinished"
   ],
   "main": "./out/src/extension.js",
@@ -35,20 +36,6 @@
         "default": {
           "fontPath": "media/caveman-commit.woff",
           "fontCharacter": "\\E900"
-        }
-      },
-      "caveman-commit-ring": {
-        "description": "Caveman Commit processing ring",
-        "default": {
-          "fontPath": "media/caveman-commit.woff",
-          "fontCharacter": "\\E901"
-        }
-      },
-      "caveman-commit-center": {
-        "description": "Caveman Commit static center",
-        "default": {
-          "fontPath": "media/caveman-commit.woff",
-          "fontCharacter": "\\E902"
         }
       }
     },
@@ -65,6 +52,10 @@
       {
         "command": "cavemanCommit.selectModel",
         "title": "Caveman Commit: Select Model"
+      },
+      {
+        "command": "cavemanCommit.loginClaude",
+        "title": "Caveman Commit: Login Claude Code"
       },
       {
         "command": "cavemanCommit.openSettings",
@@ -103,10 +94,10 @@
         },
         "cavemanCommit.timeout": {
           "type": "number",
-          "default": 60000,
+          "default": 120000,
           "minimum": 1000,
           "maximum": 600000,
-          "description": "Tempo limite da geração, em milissegundos."
+          "description": "Prazo inicial por tentativa, em milissegundos. Em timeout, refaz até duas vezes dobrando o prazo, limitado a 600000 ms por tentativa."
         },
         "cavemanCommit.maxDiffSize": {
           "type": "number",
@@ -118,8 +109,10 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run build:icons && npm run compile",
     "compile": "tsc -p tsconfig.json",
     "build:status-icon": "node scripts/build-status-font.mjs",
+    "build:icons": "node scripts/build-icons.mjs && npm run build:status-icon",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "npm run compile && node --test --test-isolation=none out/test/**/*.test.js",
@@ -129,6 +122,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.94.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",

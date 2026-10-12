@@ -27,6 +27,7 @@ import { RestartableOperation } from "./services/restartableOperation";
 import { validateCommitMessage } from "./services/responseValidator";
 import { loadSkill } from "./skills/loader";
 import { copyCommitMessage } from "./ui/clipboard";
+import { ClaudeLogin } from "./ui/claudeLogin";
 import {
   showCommitEditor,
   showCommitPreview,
@@ -73,10 +74,10 @@ async function getAvailableRepositories(): Promise<RepositoryInfo[]> {
 async function selectProvider(statusBar: CavemanStatusBar): Promise<void> {
   const selected = await vscode.window.showQuickPick(
     [
-      { label: "Codex — GPT-5.6 Terra · Medium", provider: "codex" as const },
-      { label: "Claude Code — Sonnet 5", provider: "claude" as const },
+      { label: "Codex", description: "GPT-5.6 Terra · Medium", provider: "codex" as const },
+      { label: "Claude Code", description: "Sonnet 5", provider: "claude" as const },
     ],
-    { title: "Caveman Commit: Select Provider" },
+    { title: "Caveman Commit · Provider", placeHolder: "Escolha como gerar suas mensagens" },
   );
   if (selected === undefined) {
     return;
@@ -95,16 +96,16 @@ async function selectModel(statusBar: CavemanStatusBar): Promise<void> {
   const selected = await vscode.window.showQuickPick(
     [
       {
-        label: `Usar padrão — ${defaults.displayName}`,
-        description: defaults.id,
+        label: defaults.displayName,
+        description: `Padrão · ${defaults.id}`,
         action: "default" as const,
       },
       {
-        label: "Informar identificador manualmente",
+        label: "Outro modelo…",
         action: "custom" as const,
       },
     ],
-    { title: "Caveman Commit: Select Model" },
+    { title: "Caveman Commit · Modelo", placeHolder: "Escolha o modelo" },
   );
   if (selected === undefined) {
     return;
@@ -149,10 +150,9 @@ async function createMessage(
   diff: string,
   statusBar: CavemanStatusBar,
   cancellation: vscode.CancellationToken,
+  logger: ProviderLogger,
 ): Promise<string> {
   statusBar.setProcessing();
-  // ponytail: uma reentrega basta; se duas falharem, não é azar de formatação.
-  let correction: string | undefined;
   try {
     return await vscode.window.withProgress(
       {
@@ -160,7 +160,7 @@ async function createMessage(
         title: "Caveman Commit: gerando mensagem",
         cancellable: true,
       },
-      async (_progress, progressCancellation) => {
+      async (progress, progressCancellation) => {
         const linkedCancellation = new vscode.CancellationTokenSource();
         const registrations = [
           cancellation.onCancellationRequested(() => linkedCancellation.cancel()),
@@ -173,29 +173,26 @@ async function createMessage(
           linkedCancellation.cancel();
         }
         try {
-          for (let attempt = 0; ; attempt += 1) {
-            const raw = await generateCommitMessage(
-              provider,
-              skill,
-              diff,
-              {
-                model: settings.model,
-                reasoningEffort: settings.reasoningEffort,
-                cwd: providerWorkingDirectory,
-                timeoutMs: settings.timeout,
-                cancellation: linkedCancellation.token,
-              },
-              correction,
-            );
-            try {
-              return validateCommitMessage(raw).message;
-            } catch (error) {
-              if (attempt >= 1 || !(error instanceof CavemanCommitError)) {
-                throw error;
-              }
-              correction = error.userMessage;
-            }
-          }
+          return await generateCommitMessage(
+            provider,
+            skill,
+            diff,
+            {
+              model: settings.model,
+              reasoningEffort: settings.reasoningEffort,
+              cwd: providerWorkingDirectory,
+              timeoutMs: settings.timeout,
+              cancellation: linkedCancellation.token,
+            },
+            (attempt, reason, kind) => {
+              logger.log(`Retentativa após ${kind === "timeout" ? "timeout" : "resposta rejeitada"} na tentativa ${attempt}: ${reason}`);
+              progress.report({
+                message: kind === "timeout"
+                  ? `Resposta demorou. ${reason} Tentativa ${attempt + 1}.`
+                  : `Corrigindo formato; tentativa ${attempt + 1}.`,
+              });
+            },
+          );
         } finally {
           for (const registration of registrations) {
             registration.dispose();
@@ -239,7 +236,7 @@ async function generateAndCopy(
     throw new CavemanCommitError("OPERATION_CANCELLED", "Operação cancelada.");
   }
   if (changes.length === 0) {
-    await vscode.window.showWarningMessage(
+    void vscode.window.showWarningMessage(
       "Nenhuma alteração local encontrada para gerar a mensagem.",
     );
     return;
@@ -273,6 +270,7 @@ async function generateAndCopy(
   const provider = providerFor(settings.provider, providers);
   logger.log(`Provider: ${settings.provider}.`);
   logger.log(`Modelo: ${settings.model}.`);
+  logger.log(`Prazo inicial por tentativa: ${settings.timeout / 1_000}s.`);
   if (settings.provider === "codex") {
     logger.log(`Reasoning effort: ${settings.reasoningEffort}.`);
   }
@@ -301,6 +299,7 @@ async function generateAndCopy(
         change.diff,
         statusBar,
         cancellation,
+        logger,
       );
       drafts.push({
         repositoryName: change.repository.name,
@@ -336,11 +335,13 @@ async function generateAndCopy(
     change.diff,
     statusBar,
     cancellation,
+    logger,
   );
   await copyCommitMessage(vscode.env.clipboard, message);
   logger.log("Mensagem gerada e copiada para a área de transferência.");
   for (;;) {
     const preview = await showCommitPreview(
+      context.extensionUri,
       message,
       providerLabel,
       settings.model,
@@ -352,7 +353,7 @@ async function generateAndCopy(
     }
     if (preview.action === "copy") {
       await copyCommitMessage(vscode.env.clipboard, message);
-      await vscode.window.showInformationMessage(
+      void vscode.window.showInformationMessage(
         "Mensagem de commit copiada para a área de transferência.",
       );
       return;
@@ -367,6 +368,7 @@ async function generateAndCopy(
         change.diff,
         statusBar,
         cancellation,
+        logger,
       );
       await copyCommitMessage(vscode.env.clipboard, message);
       logger.log("Nova mensagem copiada para a área de transferência.");
@@ -391,6 +393,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const channel = vscode.window.createOutputChannel("Caveman Commit");
   const logger = new OutputLogger(channel);
   const statusBar = new CavemanStatusBar();
+  const login = new ClaudeLogin(vscode.Uri.joinPath(context.globalStorageUri, "login"));
   const providers: Readonly<Record<ProviderId, CommitProvider>> = {
     codex: new CodexProvider({ run: runProcess, logger }),
     claude: new ClaudeProvider({ run: runProcess, logger }),
@@ -406,9 +409,23 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   refreshStatus();
 
+  const openClaudeLogin = async (): Promise<void> => {
+    try {
+      await login.open();
+      logger.log("Login do Claude aberto no terminal integrado.");
+      void vscode.window.showInformationMessage(
+        "Conclua o login do Claude no navegador. Depois, clique em Caveman Commit para gerar a mensagem.",
+      );
+    } catch (error) {
+      logger.log(`Falha ao abrir login do Claude: ${asUserMessage(error)}`);
+      void vscode.window.showErrorMessage(asUserMessage(error));
+    }
+  };
+
   const generation = new RestartableOperation(
     () => new vscode.CancellationTokenSource(),
     async (cancellation) => {
+      statusBar.setProcessing();
       try {
         await generateAndCopy(
           context,
@@ -421,13 +438,18 @@ export function activate(context: vscode.ExtensionContext): void {
         const message = asUserMessage(error);
         logger.log(
           error instanceof CavemanCommitError
-            ? `Erro [${error.code}].`
+            ? `Erro [${error.code}]: ${message}`
             : "Erro inesperado.",
         );
         if (
+          !cancellation.isCancellationRequested &&
           !(error instanceof CavemanCommitError && error.code === "OPERATION_CANCELLED")
         ) {
-          await vscode.window.showErrorMessage(message);
+          if (error instanceof CavemanCommitError && error.code === "CLAUDE_NOT_AUTHENTICATED") {
+            void openClaudeLogin();
+          } else {
+            void vscode.window.showErrorMessage(message);
+          }
         }
       } finally {
         refreshStatus();
@@ -438,10 +460,13 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     channel,
     statusBar,
+    login,
     generation,
-    vscode.commands.registerCommand("cavemanCommit.generateCommit", () =>
-      generation.trigger(),
-    ),
+    vscode.commands.registerCommand("cavemanCommit.generateCommit", () => {
+      logger.log("Solicitação de geração recebida.");
+      return generation.trigger();
+    }),
+    vscode.commands.registerCommand("cavemanCommit.loginClaude", openClaudeLogin),
     vscode.commands.registerCommand("cavemanCommit.selectProvider", () =>
       selectProvider(statusBar),
     ),

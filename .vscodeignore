@@ -9,4 +9,7 @@ tsconfig.json
 eslint.config.js
 node_modules/**
 scripts/**
+output/**
+PRODUCT.md
+DESIGN.md
 *.vsix

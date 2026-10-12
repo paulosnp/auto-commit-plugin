@@ -35,7 +35,7 @@ export function looksLikeUnavailableModel(stderr: string): boolean {
 }
 
 export function looksLikeAuthenticationError(output: string): boolean {
-  return /not logged in|please (?:run|use).{0,20}(?:login|\/login)|authentication required|unauthorized|status.?401/i.test(
+  return /not logged in|please (?:run|use).{0,20}(?:login|\/login)|authentication required|unauthorized|status.?401|failed to authenticate|oauth.{0,40}(?:expired|revoked)|(?:access|refresh) token.{0,30}(?:expired|invalid|revoked)|(?:could not|failed to|unable to) refresh/i.test(
     output,
   );
 }
