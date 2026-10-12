@@ -69,6 +69,75 @@ test("normaliza resposta válida sem consumir outra geração", async () => {
   assert.equal(calls, 1);
 });
 
+test("aceita resposta válida na oitava retentativa após oito rejeições", async () => {
+  let calls = 0;
+  const retries: number[] = [];
+  const provider: CommitProvider = {
+    id: "claude",
+    async generateCommit() {
+      calls++;
+      return calls === 9 ? "fix(cli): limitar retentativas" : "resposta inválida";
+    },
+  };
+  assert.equal(await generateCommitMessage(provider, "skill", "diff", options, attempt => { retries.push(attempt); }), "fix(cli): limitar retentativas");
+  assert.equal(calls, 9);
+  assert.deepEqual(retries, [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("nona rejeição encerra sem décima chamada e preserva último motivo", async () => {
+  let calls = 0; let retries = 0;
+  const provider: CommitProvider = {
+    id: "codex",
+    async generateCommit() { calls++; return calls % 2 ? "" : "resposta inválida"; },
+  };
+  await assert.rejects(generateCommitMessage(provider, "skill", "diff", options, () => { retries++; }), (error: unknown) => {
+    assert.ok(error instanceof CavemanCommitError);
+    assert.equal(error.code, "AI_RESPONSE_RETRIES_EXHAUSTED");
+    assert.match(error.userMessage, /tentativa inicial e 8 retentativas/);
+    assert.match(error.userMessage, /Resposta vazia da IA/);
+    assert.ok(error.cause instanceof CavemanCommitError);
+    assert.equal(error.cause.code, "EMPTY_AI_RESPONSE");
+    return true;
+  });
+  assert.equal(calls, 9); assert.equal(retries, 8);
+});
+
+test("timeout não consome nem reinicia limite de oito retentativas por rejeição", async () => {
+  for (const lastResponse of ["fix(cli): limitar retentativas", "resposta inválida"]) {
+    let calls = 0;
+    const kinds: string[] = [];
+    const provider: CommitProvider = {
+      id: "claude",
+      async generateCommit() {
+        calls++;
+        if (calls === 5 || calls === 10) throw new CavemanCommitError("PROCESS_TIMEOUT", "timeout");
+        return calls === 11 ? lastResponse : "resposta inválida";
+      },
+    };
+    const result = generateCommitMessage(provider, "skill", "diff", options, (_, __, kind) => { kinds.push(kind); });
+    if (lastResponse.startsWith("fix")) assert.equal(await result, lastResponse);
+    else await assert.rejects(result, { code: "AI_RESPONSE_RETRIES_EXHAUSTED" });
+    assert.equal(calls, 11);
+    assert.equal(kinds.filter(kind => kind === "validation").length, 8);
+    assert.equal(kinds.filter(kind => kind === "timeout").length, 2);
+  }
+});
+
+test("cancelamento na última resposta tem prioridade sobre esgotamento", async () => {
+  let calls = 0;
+  const cancellation = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
+  const provider: CommitProvider = {
+    id: "codex",
+    async generateCommit() {
+      calls++;
+      if (calls === 9) cancellation.isCancellationRequested = true;
+      return "resposta inválida";
+    },
+  };
+  await assert.rejects(generateCommitMessage(provider, "skill", "diff", { ...options, cancellation }), { code: "OPERATION_CANCELLED" });
+  assert.equal(calls, 9);
+});
+
 test("cancelamento interrompe recuperação antes de iniciar outra tentativa", async () => {
   const cancellation = {
     isCancellationRequested: false,

@@ -14,10 +14,16 @@ feat(usuarios): adicionar filtro por secretaria
 - Copia automaticamente a mensagem individual quando o diff continua atualizado.
 - Preview com edição, regeneração, cópia e preenchimento do campo de commit no Git.
 - Interface discreta, inspirada no ChatGPT para Windows, acompanha o tema do VS Code.
-- Resposta vazia ou fora do formato: refaz automaticamente até validar, usando
-  o motivo da rejeição e a resposta anterior para corrigir a próxima tentativa.
+- Resposta vazia ou fora do formato: até **8 retentativas** após a chamada inicial,
+  usando o motivo da rejeição e a resposta anterior para corrigir o formato.
+  Se a nona resposta também for inválida, encerra com erro e o último motivo.
   Timeout: refaz até duas vezes, dobrando o prazo até 600 segundos por tentativa.
   Cancelamento, falhas do CLI e esgotamento das retentativas interrompem a geração.
+
+As instruções e a skill empacotada usam texto compacto, preservando as regras de
+idioma, formato e fidelidade ao diff. O diff continua integral. Limites de rejeição
+e timeout são separados: no máximo 9 respostas rejeitadas e 2 retentativas de
+timeout, totalizando até 11 chamadas à IA no pior caso.
 
 ## O que não faz
 
@@ -187,6 +193,7 @@ explicação; geração e cópia continuam funcionando. Nenhum stage, commit ou 
 | Geração interrompida | Novo clique durante a execução cancela o fluxo anterior |
 | Pedido de confirmação antes de enviar | Diff acima de `cavemanCommit.maxDiffSize` |
 | Geração expira | Padrão 120s; até duas retentativas com prazo crescente. Se persistir, verifique conexão/CLI e ajuste `cavemanCommit.timeout` |
+| Respostas rejeitadas esgotaram as retentativas | Limite de 8 retentativas após a chamada inicial; o erro informa o último motivo da rejeição |
 | Autenticação do Claude ausente, inválida ou expirada | O login abre no terminal integrado; autentique no navegador e clique novamente na extensão |
 
 Abra `Output → Caveman Commit` para ver provider, modelo, repositório, tamanho do

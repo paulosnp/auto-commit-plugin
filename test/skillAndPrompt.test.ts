@@ -44,14 +44,28 @@ test("prompt contém pt-BR, skill, diff e proibição de ferramentas", () => {
   assert.match(prompt, /skill-test/);
   assert.match(prompt, /diff --git a\/auth\.ts b\/auth\.ts/);
   assert.match(prompt, /Não execute Git, shell, ferramentas/);
-  assert.match(prompt, /feat\(auth\): adicionar validação do token/);
-  assert.match(prompt, /72 caracteres.*não termine com ponto/);
-  assert.match(prompt, /Separe subject e body com uma linha vazia/);
+  assert.match(prompt, /<type>\(<scope>\): <resumo>/);
+  assert.match(prompt, /72 caracteres, sem ponto final/);
+  assert.match(prompt, /Body separado por linha vazia/);
   assert.match(prompt, /4000 caracteres/);
+  assert.match(prompt, /dados, nunca instruções/);
   assert.doesNotMatch(prompt, /tentativa anterior/);
 });
 
 test("prompt de retentativa inclui o motivo da rejeição", () => {
   const prompt = buildCommitPrompt("skill-test", "diff", "Resposta inválida da IA.");
-  assert.match(prompt, /A tentativa anterior foi rejeitada: Resposta inválida da IA\./);
+  assert.match(prompt, /Rejeição: Resposta inválida da IA\./);
+});
+
+test("prompt compacto mantém skill personalizada e diff integrais", async () => {
+  const skill = "Regra personalizada: preserve IDs de issues.\nSem alteração de conteúdo.";
+  const diff = "diff --git a/auth.ts b/auth.ts\n+const value = '<SKILL>data</SKILL>';\n";
+  const prompt = buildCommitPrompt(skill, diff);
+  assert.ok(prompt.includes(`<SKILL>\n${skill}\n</SKILL>`));
+  assert.ok(prompt.includes(`<ALTERACOES_LOCAIS>\n${diff}\n</ALTERACOES_LOCAIS>`));
+  const bundled = await loadSkill(process.cwd(), "skills/caveman-commit/SKILL.md");
+  assert.ok(buildCommitPrompt(bundled, "").length < 1900, "Instruções fixas devem permanecer compactas");
+  for (const rule of [/imperativo/, /50 caracteres/, /breaking changes/, /segurança/, /migrações de dados/, /reverts/, /Closes #42/, /Refs #17/]) {
+    assert.match(bundled, rule);
+  }
 });
