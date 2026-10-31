@@ -24,7 +24,7 @@ export interface CommitSurfaceOptions {
   readonly session?: boolean;
 }
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
@@ -37,9 +37,12 @@ const paths = {
   check: '<path d="m5 12 4 4L19 6"/>',
   arrow: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
   folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  minus: '<path d="M5 12h14"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
 } as const;
 
-function icon(name: keyof typeof paths): string {
+export function icon(name: keyof typeof paths): string {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`;
 }
 
@@ -71,34 +74,8 @@ function editor(draft: SurfaceDraft, index: number, multi: boolean, session: boo
   </section>`;
 }
 
-export function renderCommitSurface(options: CommitSurfaceOptions): string {
-  const { mode, drafts, nonce, iconUri, cspSource, provider, model } = options;
-  const message = drafts[0]?.message ?? "";
-  const [subject = "", ...bodyLines] = message.split(/\r?\n/);
-  const body = bodyLines.join("\n").trim();
-  const title = mode === "preview" ? "Mensagem pronta" : mode === "editor" ? "Editar mensagem" : "Mensagens prontas";
-  const content = mode === "preview"
-    ? `<section class="draft preview-draft" data-index="0">${options.session ? details(drafts[0]!) + warning(drafts[0]!) : ""}<section class="response" aria-label="Mensagem de commit gerada">
-        <div class="response-label"><span>Caveman Commit</span><span class="copied-label">${!options.session || drafts[0]?.copied ? icon("check") + "Copiada" : "Aguardando revisão"}</span></div>
-        <pre class="commit-subject">${escapeHtml(subject)}</pre>
-        ${body ? `<pre class="commit-body">${escapeHtml(body)}</pre>` : ""}
-        <p class="clipboard-note">${!options.session || drafts[0]?.copied ? "Mensagem completa na área de transferência." : "Revise antes de copiar ou usar no Git."}</p>
-      </section>
-      <div class="preview-actions">
-        <div class="secondary-actions"><button id="edit" class="secondary" type="button">${icon("edit")}Editar</button><button id="regenerate" class="secondary regenerate" type="button">${icon("retry")}Regenerar</button>${options.session ? gitButton(drafts[0]!) : ""}</div>
-        <button id="copy" class="primary" type="button">${icon("copy")}Copiar e fechar</button>
-      </div><p class="feedback" role="status" aria-live="polite"></p></section>`
-    : drafts.map((draft, index) => editor(draft, index, mode === "multi", options.session === true)).join("");
-
-  return `<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource}; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} · Caveman Commit</title>
-  <style nonce="${nonce}">
-    :root {
+// Shared by every Caveman Commit webview so all surfaces keep one visual system.
+export const surfaceStyles = `    :root {
       color-scheme: light dark;
       --bg: var(--vscode-editor-background, #fff);
       --ink: var(--vscode-foreground, #242424);
@@ -187,7 +164,36 @@ export function renderCommitSurface(options: CommitSurfaceOptions): string {
       textarea { min-height: 220px; }
     }
     @media (prefers-reduced-motion: reduce) { button { transition: none; } }
-    @media (forced-colors: active) { .composer, button { border: 1px solid ButtonText; } .primary { color: ButtonText; background: ButtonFace; } }
+    @media (forced-colors: active) { .composer, button { border: 1px solid ButtonText; } .primary { color: ButtonText; background: ButtonFace; } }`;
+
+export function renderCommitSurface(options: CommitSurfaceOptions): string {
+  const { mode, drafts, nonce, iconUri, cspSource, provider, model } = options;
+  const message = drafts[0]?.message ?? "";
+  const [subject = "", ...bodyLines] = message.split(/\r?\n/);
+  const body = bodyLines.join("\n").trim();
+  const title = mode === "preview" ? "Mensagem pronta" : mode === "editor" ? "Editar mensagem" : "Mensagens prontas";
+  const content = mode === "preview"
+    ? `<section class="draft preview-draft" data-index="0">${options.session ? details(drafts[0]!) + warning(drafts[0]!) : ""}<section class="response" aria-label="Mensagem de commit gerada">
+        <div class="response-label"><span>Caveman Commit</span><span class="copied-label">${!options.session || drafts[0]?.copied ? icon("check") + "Copiada" : "Aguardando revisão"}</span></div>
+        <pre class="commit-subject">${escapeHtml(subject)}</pre>
+        ${body ? `<pre class="commit-body">${escapeHtml(body)}</pre>` : ""}
+        <p class="clipboard-note">${!options.session || drafts[0]?.copied ? "Mensagem completa na área de transferência." : "Revise antes de copiar ou usar no Git."}</p>
+      </section>
+      <div class="preview-actions">
+        <div class="secondary-actions"><button id="edit" class="secondary" type="button">${icon("edit")}Editar</button><button id="regenerate" class="secondary regenerate" type="button">${icon("retry")}Regenerar</button>${options.session ? gitButton(drafts[0]!) : ""}</div>
+        <button id="copy" class="primary" type="button">${icon("copy")}Copiar e fechar</button>
+      </div><p class="feedback" role="status" aria-live="polite"></p></section>`
+    : drafts.map((draft, index) => editor(draft, index, mode === "multi", options.session === true)).join("");
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource}; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} · Caveman Commit</title>
+  <style nonce="${nonce}">
+${surfaceStyles}
   </style>
 </head>
 <body>

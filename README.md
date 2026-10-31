@@ -1,7 +1,7 @@
 # Caveman Commit
 
 Extensão do VS Code que gera a mensagem de commit em português brasileiro usando
-Codex CLI ou Claude Code CLI, copia para a área de transferência e **nunca**
+Codex CLI, Claude Code CLI ou Gemini (Antigravity CLI `agy` ou Gemini CLI), copia para a área de transferência e **nunca**
 executa o commit.
 
 ```text
@@ -39,7 +39,10 @@ Pré-requisitos:
 - Git no `PATH`
 - Codex CLI ou Claude Code CLI instalado no `PATH`, **ou** extensão correspondente
   (`openai.chatgpt` / `anthropic.claude-code`) com executável embutido compatível.
-  A autenticação do provider continua necessária.
+- Para Gemini: Antigravity CLI (`agy`) no `PATH` ou em `~/.gemini/bin` (instalado
+  pelo Antigravity), com prioridade; senão Gemini CLI (`npm i -g @google/gemini-cli`)
+  no `PATH`. Autentique executando o CLI uma vez no terminal.
+- A autenticação do provider continua necessária.
 
 Passos:
 
@@ -84,9 +87,10 @@ Nenhuma publicação é feita automaticamente.
 | `Caveman Commit: Generate Commit` | Gera a mensagem do repositório atual |
 | `Caveman Commit: Generate Commit for Repository` | Gera somente para o repositório recebido do Source Control; sem contexto claro, abre seletor |
 | `Caveman Commit: Select Changes` | Escolhe todas as alterações ou somente staged; também disponível no hover da barra |
-| `Caveman Commit: Select Provider` | Alterna entre Codex e Claude Code |
-| `Caveman Commit: Select Model` | Restaura o modelo padrão ou aceita um identificador explícito |
-| `Caveman Commit: Open Settings` | Abre as configurações da extensão |
+| `Caveman Commit: Select Provider` | Alterna entre Codex, Claude Code e Gemini; restaura modelo e effort padrão |
+| `Caveman Commit: Select Model` | Lista modelos disponíveis (Codex: `codex debug models`; Gemini: `agy models`; Claude e Gemini CLI: aliases) ou aceita um identificador explícito |
+| `Caveman Commit: Select Effort` | Escolhe o reasoning effort suportado pelo provider/modelo (ignorado pelo Gemini CLI) |
+| `Caveman Commit: Open Settings` | Abre a aba de configurações (provider, modelo, effort, escopo e avançado); também pelo link "Configurações" do hover |
 | `Caveman Commit: Login Claude Code` | Abre o login do Claude no terminal integrado |
 
 Configurações são gravadas no workspace quando ele existe; caso contrário,
@@ -96,8 +100,9 @@ globalmente.
 
 | Provider | Modelo | Observação |
 | --- | --- | --- |
-| Codex | `gpt-5.6-terra` (GPT-5.6 Terra) | reasoning effort `medium` |
-| Claude Code | `claude-sonnet-5` (Claude Sonnet 5) | effort `low`; system prompt dedicado à mensagem de commit |
+| Codex | `gpt-5.6-terra` (GPT-5.6 Terra) | reasoning effort `medium` (`low`–`max`; `ultra` quando o modelo suporta) |
+| Claude Code | `claude-sonnet-5` (Claude Sonnet 5) | effort `low` (`low`–`max`); system prompt dedicado à mensagem de commit |
+| Gemini | `gemini-3.8-flash` (Gemini 3.8 Flash) | effort `low` via `agy`; no Gemini CLI vira o alias `flash`, sem effort |
 
 Não há fallback automático: modelo indisponível produz erro explícito.
 
@@ -105,10 +110,10 @@ Não há fallback automático: modelo indisponível produz erro explícito.
 
 | Chave | Padrão | Efeito |
 | --- | --- | --- |
-| `cavemanCommit.provider` | `codex` | CLI usado para gerar mensagens (`codex` ou `claude`) |
+| `cavemanCommit.provider` | `codex` | CLI usado para gerar mensagens (`codex`, `claude` ou `gemini`) |
 | `cavemanCommit.diffScope` | `all` | `all`: staged, unstaged e untracked; `staged`: somente index |
 | `cavemanCommit.model` | `""` | Identificador do modelo; vazio usa o padrão do provider |
-| `cavemanCommit.reasoningEffort` | `medium` | Reasoning effort do Codex; a extensão exige `medium` |
+| `cavemanCommit.reasoningEffort` | `""` | Reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`, `ultra`); vazio usa o padrão do provider; ignorado quando o Gemini roda via Gemini CLI |
 | `cavemanCommit.skillPath` | `skills/caveman-commit/SKILL.md` | Caminho absoluto ou relativo à instalação da extensão para a skill |
 | `cavemanCommit.timeout` | `120000` | Prazo inicial por tentativa, em milissegundos (1000–600000); timeout dobra o prazo em até duas retentativas |
 | `cavemanCommit.maxDiffSize` | `500000` | Tamanho em bytes que exige confirmação antes do envio integral das alterações |
@@ -118,7 +123,7 @@ Não há fallback automático: modelo indisponível produz erro explícito.
   "cavemanCommit.provider": "codex",
   "cavemanCommit.diffScope": "all",
   "cavemanCommit.model": "",
-  "cavemanCommit.reasoningEffort": "medium",
+  "cavemanCommit.reasoningEffort": "",
   "cavemanCommit.skillPath": "skills/caveman-commit/SKILL.md",
   "cavemanCommit.timeout": 120000,
   "cavemanCommit.maxDiffSize": 500000
@@ -180,8 +185,13 @@ explicação; geração e cópia continuam funcionando. Nenhum stage, commit ou 
 - Nenhum comando Git mutável é executado.
 - Codex roda com sandbox `read-only`, sessão efêmera e configuração ignorada.
 - Claude roda sem ferramentas, sem persistência de sessão e em safe mode.
+- Gemini via `agy` roda em `--sandbox`, sem slash commands e com regras de negação
+  para comandos, leitura/escrita de arquivos, URLs e MCP. A busca web do `agy` não
+  pode ser bloqueada por regra; o prompt instrui a não usar ferramentas.
+- Gemini via Gemini CLI roda em `--approval-mode plan` (somente leitura), sem
+  extensões e com saída em texto.
 - Providers executam em diretório isolado da extensão.
-- No Windows, shims npm como `codex.cmd` e `claude.cmd` são resolvidos para o
+- No Windows, shims npm como `codex.cmd`, `claude.cmd` e `gemini.cmd` são resolvidos para o
   entrypoint Node.js correspondente sem ativar shell intermediário.
 
 ## Troubleshooting
@@ -195,6 +205,7 @@ explicação; geração e cópia continuam funcionando. Nenhum stage, commit ou 
 | Geração expira | Padrão 120s; até duas retentativas com prazo crescente. Se persistir, verifique conexão/CLI e ajuste `cavemanCommit.timeout` |
 | Respostas rejeitadas esgotaram as retentativas | Limite de 8 retentativas após a chamada inicial; o erro informa o último motivo da rejeição |
 | Autenticação do Claude ausente, inválida ou expirada | O login abre no terminal integrado; autentique no navegador e clique novamente na extensão |
+| Gemini não autenticado | Execute `agy` (ou `gemini`) no terminal, conclua o login e gere novamente |
 
 Abra `Output → Caveman Commit` para ver provider, modelo, repositório, tamanho do
 diff, origem/versão do executável, duração e exit code. O diff completo nunca aparece nos logs.

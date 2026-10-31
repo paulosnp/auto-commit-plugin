@@ -1,5 +1,6 @@
 import type { CancellationLike, ProcessRunner } from "../process/runProcess";
 import type { ProviderExecutableResolver } from "../process/providerExecutable";
+import type { ProviderId } from "../config/models";
 
 export interface CommitGenerationOptions {
   readonly model: string;
@@ -14,7 +15,7 @@ export interface ProviderLogger {
 }
 
 export interface CommitProvider {
-  readonly id: "codex" | "claude";
+  readonly id: ProviderId;
   generateCommit(
     prompt: string,
     options: CommitGenerationOptions,

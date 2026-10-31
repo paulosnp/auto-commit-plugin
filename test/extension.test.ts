@@ -73,11 +73,13 @@ const dependencies: Record<string, unknown> = {
   "./git/gitClient": { getChangesDiff: async () => state.diff, diffSizeInBytes: () => 100, isLargeDiff: () => false },
   "./providers/claude": { ClaudeProvider: Provider },
   "./providers/codex": { CodexProvider: Provider },
+  "./providers/gemini": { GeminiProvider: Provider },
   "./skills/loader": { loadSkill: async () => "skill" },
   "./ui/commitPreview": { showCommitSession: async (_uri: unknown, drafts: CommitDraft[], actions: CommitSessionActions) => {
     state.drafts = drafts;
     if (state.previewAction === "copy" || state.previewAction === "useGit") await actions.act(drafts[0]!, state.previewAction, drafts[0]!.message, false);
   } },
+  "./ui/settingsPanel": { showSettingsPanel: () => undefined },
   "./ui/claudeLogin": { ClaudeLogin: class { public async open(): Promise<void> { state.logins += 1; } public dispose(): void {} } },
   "./ui/statusBar": { CavemanStatusBar: class { public update(): void {} public setProcessing(): void { state.processing += 1; } public dispose(): void {} } },
 };

@@ -113,3 +113,26 @@ test("fallback preserva resolução segura de shim npm e rejeita shim desconheci
       (error: unknown) => error instanceof CavemanCommitError && error.code === "UNSUPPORTED_WINDOWS_SHIM");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("Gemini prefere agy no PATH, depois ~/.gemini/bin, depois gemini CLI, sem consultar extensão", async () => {
+  const root = await mkdtemp(join(tmpdir(), "caveman-gemini-"));
+  try {
+    const bin = join(root, "path");
+    const home = join(root, "home");
+    const resolve = () => resolveProviderExecutable("gemini", () => assert.fail("Não consultar extensão"),
+      { PATH: bin }, "win32", "x64", home);
+    assert.throws(resolve, (error: unknown) => error instanceof CavemanCommitError &&
+      error.code === "CLI_NOT_FOUND" && /agy.*@google\/gemini-cli/.test(error.userMessage));
+
+    await file(join(bin, "gemini.exe"));
+    assert.deepEqual(resolve(), { command: join(bin, "gemini.exe"), prefixArgs: [], source: "gemini (PATH)", cli: "gemini-cli" });
+
+    await file(join(home, ".gemini", "bin", "agy.exe"));
+    assert.deepEqual(resolve(), {
+      command: join(home, ".gemini", "bin", "agy.exe"), prefixArgs: [], source: "agy (~/.gemini/bin)", cli: "agy",
+    });
+
+    await file(join(bin, "agy.exe"));
+    assert.deepEqual(resolve(), { command: join(bin, "agy.exe"), prefixArgs: [], source: "agy (PATH)", cli: "agy" });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

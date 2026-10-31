@@ -1,8 +1,8 @@
 {
   "name": "caveman-commit",
   "displayName": "Caveman Commit",
-  "description": "Gera e copia mensagens de commit em pt-BR com Codex CLI ou Claude Code CLI.",
-  "version": "0.6.1",
+  "description": "Gera e copia mensagens de commit em pt-BR com Codex CLI, Claude Code CLI ou Gemini (Antigravity CLI ou Gemini CLI).",
+  "version": "0.8.0",
   "publisher": "PauloooSNP",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -18,12 +18,14 @@
     "commit",
     "codex",
     "claude",
+    "gemini",
     "conventional-commits"
   ],
   "activationEvents": [
     "onCommand:cavemanCommit.generateCommit",
     "onCommand:cavemanCommit.selectProvider",
     "onCommand:cavemanCommit.selectModel",
+    "onCommand:cavemanCommit.selectEffort",
     "onCommand:cavemanCommit.openSettings",
     "onCommand:cavemanCommit.loginClaude",
     "onStartupFinished"
@@ -54,6 +56,10 @@
         "title": "Caveman Commit: Select Model"
       },
       {
+        "command": "cavemanCommit.selectEffort",
+        "title": "Caveman Commit: Select Effort"
+      },
+      {
         "command": "cavemanCommit.loginClaude",
         "title": "Caveman Commit: Login Claude Code"
       },
@@ -78,7 +84,8 @@
           "type": "string",
           "enum": [
             "codex",
-            "claude"
+            "claude",
+            "gemini"
           ],
           "default": "codex",
           "description": "CLI usado para gerar mensagens de commit."
@@ -91,10 +98,25 @@
         "cavemanCommit.reasoningEffort": {
           "type": "string",
           "enum": [
-            "medium"
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "ultra"
           ],
-          "default": "medium",
-          "description": "Reasoning effort do Codex. Caveman Commit exige medium."
+          "enumDescriptions": [
+            "Padrão do provider (Codex: medium; Claude Code e Gemini: low).",
+            "Codex, Claude Code e Gemini via agy.",
+            "Codex, Claude Code e Gemini via agy.",
+            "Codex, Claude Code e Gemini via agy.",
+            "Codex, Claude Code e Gemini via agy.",
+            "Codex, Claude Code e Gemini via agy.",
+            "Somente Codex, em modelos que suportam."
+          ],
+          "default": "",
+          "description": "Reasoning effort enviado ao CLI. Vazio usa o padrão do provider. Ignorado quando o Gemini roda via @google/gemini-cli, que não suporta effort."
         },
         "cavemanCommit.skillPath": {
           "type": "string",

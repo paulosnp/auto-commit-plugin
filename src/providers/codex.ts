@@ -21,13 +21,12 @@ export class CodexProvider implements CommitProvider {
     prompt: string,
     options: CommitGenerationOptions,
   ): Promise<string> {
-    if (options.reasoningEffort !== "medium") {
-      throw new CavemanCommitError(
-        "INVALID_REASONING_EFFORT",
-        "Reasoning effort inválido. Use medium.",
-      );
+    const reasoningEffort = options.reasoningEffort ?? DEFAULT_MODELS.codex.reasoningEffort;
+    // The value is interpolated into a TOML override; accept only bare effort identifiers.
+    if (!/^[a-z]+$/.test(reasoningEffort)) {
+      throw new CavemanCommitError("INVALID_REASONING_EFFORT", "Reasoning effort inválido.");
     }
-    const run = await prepareProviderCli(this.dependencies, this.id, options);
+    const { run } = await prepareProviderCli(this.dependencies, this.id, options);
 
     const args = [
       "exec",
@@ -38,7 +37,7 @@ export class CodexProvider implements CommitProvider {
       "--model",
       options.model,
       "--config",
-      'model_reasoning_effort="medium"',
+      `model_reasoning_effort="${reasoningEffort}"`,
       "--sandbox",
       "read-only",
       "--color",
@@ -70,7 +69,7 @@ export class CodexProvider implements CommitProvider {
       ) {
         throw new CavemanCommitError(
           "DEFAULT_MODEL_UNAVAILABLE",
-          "O modelo GPT-5.6 Terra não está disponível na instalação atual do Codex.",
+          `O modelo ${DEFAULT_MODELS.codex.displayName} não está disponível na instalação atual do Codex.`,
         );
       }
       throw new CavemanCommitError(

@@ -1,6 +1,17 @@
 import * as vscode from "vscode";
 
-import { DEFAULT_MODELS, type ProviderId } from "./config/models";
+import {
+  DEFAULT_MODELS,
+  EFFORT_LEVELS,
+  effortAfterModelChange,
+  getDefaultEffort,
+  PROVIDER_IDS,
+  PROVIDER_LABELS,
+  STATIC_MODELS,
+  supportsEffort,
+  type ModelOption,
+  type ProviderId,
+} from "./config/models";
 import {
   configurationTarget,
   readSettings,
@@ -22,6 +33,9 @@ import { runProcess } from "./process/runProcess";
 import { resolveProviderExecutable, type ProviderExecutableResolver } from "./process/providerExecutable";
 import { ClaudeProvider } from "./providers/claude";
 import { CodexProvider } from "./providers/codex";
+import { listCodexModels } from "./providers/codexCatalog";
+import { GeminiProvider } from "./providers/gemini";
+import { listGeminiModels } from "./providers/geminiCatalog";
 import type { CommitProvider, ProviderLogger } from "./providers/provider";
 import { generateCommitMessage } from "./services/commitGenerator";
 import { RestartableOperation } from "./services/restartableOperation";
@@ -32,6 +46,7 @@ import { loadSkill } from "./skills/loader";
 import { copyCommitMessage } from "./ui/clipboard";
 import { ClaudeLogin } from "./ui/claudeLogin";
 import { showCommitSession } from "./ui/commitPreview";
+import { showSettingsPanel } from "./ui/settingsPanel";
 import { CavemanStatusBar } from "./ui/statusBar";
 
 interface GitApi {
@@ -77,12 +92,34 @@ async function getAvailableRepositories(): Promise<RepositoryInfo[]> {
   return discoverRepositories(runProcess, folders);
 }
 
+type ModelCatalog = () => Promise<readonly ModelOption[]>;
+type ModelCatalogs = Readonly<Record<"codex" | "gemini", ModelCatalog>>;
+
+async function modelOptions(provider: ProviderId, catalogs: ModelCatalogs): Promise<readonly ModelOption[]> {
+  const defaults = DEFAULT_MODELS[provider];
+  const listed = provider === "claude"
+    ? STATIC_MODELS.claude
+    : await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: "Caveman Commit: carregando modelos" },
+      () => catalogs[provider](),
+    );
+  const fallback: ModelOption = { id: defaults.id, displayName: defaults.displayName };
+  return [
+    listed.find((model) => model.id === defaults.id) ?? fallback,
+    ...listed.filter((model) => model.id !== defaults.id),
+  ];
+}
+
 async function selectProvider(statusBar: CavemanStatusBar): Promise<void> {
   const selected = await vscode.window.showQuickPick(
-    [
-      { label: "Codex", description: "GPT-5.6 Terra · Medium", provider: "codex" as const },
-      { label: "Claude Code", description: "Sonnet 5", provider: "claude" as const },
-    ],
+    PROVIDER_IDS.map((provider) => {
+      const defaults = DEFAULT_MODELS[provider];
+      return {
+        label: PROVIDER_LABELS[provider],
+        description: [defaults.displayName, defaults.reasoningEffort].filter(Boolean).join(" · "),
+        provider,
+      };
+    }),
     { title: "Caveman Commit · Provider", placeHolder: "Escolha como gerar suas mensagens" },
   );
   if (selected === undefined) {
@@ -92,23 +129,30 @@ async function selectProvider(statusBar: CavemanStatusBar): Promise<void> {
   const target = configurationTarget();
   await config.update("provider", selected.provider, target);
   await config.update("model", "", target);
+  await config.update("reasoningEffort", "", target);
   const settings = readSettings();
   statusBar.update(settings.provider, settings.model, settings.reasoningEffort, settings.diffScope);
 }
 
-async function selectModel(statusBar: CavemanStatusBar): Promise<void> {
+async function selectModel(statusBar: CavemanStatusBar, catalogs: ModelCatalogs): Promise<void> {
   const settings = readSettings();
   const defaults = DEFAULT_MODELS[settings.provider];
+  const models = await modelOptions(settings.provider, catalogs);
   const selected = await vscode.window.showQuickPick(
     [
-      {
-        label: defaults.displayName,
-        description: `Padrão · ${defaults.id}`,
-        action: "default" as const,
-      },
+      ...models.map((model) => ({
+        label: model.displayName,
+        description: [
+          model.id === defaults.id ? "Padrão" : undefined,
+          model.id,
+          model.id === settings.model ? "Atual" : undefined,
+        ].filter(Boolean).join(" · "),
+        detail: model.description,
+        model,
+      })),
       {
         label: "Outro modelo…",
-        action: "custom" as const,
+        model: undefined,
       },
     ],
     { title: "Caveman Commit · Modelo", placeHolder: "Escolha o modelo" },
@@ -116,8 +160,9 @@ async function selectModel(statusBar: CavemanStatusBar): Promise<void> {
   if (selected === undefined) {
     return;
   }
-  let value = "";
-  if (selected.action === "custom") {
+  const config = vscode.workspace.getConfiguration("cavemanCommit");
+  let value = selected.model === undefined || selected.model.id === defaults.id ? "" : selected.model.id;
+  if (selected.model === undefined) {
     const entered = await vscode.window.showInputBox({
       title: "Identificador do modelo",
       value: settings.model,
@@ -130,9 +175,41 @@ async function selectModel(statusBar: CavemanStatusBar): Promise<void> {
     }
     value = entered.trim();
   }
-  await vscode.workspace
-    .getConfiguration("cavemanCommit")
-    .update("model", value, configurationTarget());
+  const target = configurationTarget();
+  await config.update("model", value, target);
+  const effort = effortAfterModelChange(settings.provider, config.get<string>("reasoningEffort", ""), selected.model);
+  if (effort !== undefined) await config.update("reasoningEffort", effort, target);
+  const updated = readSettings();
+  statusBar.update(updated.provider, updated.model, updated.reasoningEffort, updated.diffScope);
+}
+
+async function selectEffort(statusBar: CavemanStatusBar, catalogs: ModelCatalogs): Promise<void> {
+  const settings = readSettings();
+  const label = PROVIDER_LABELS[settings.provider];
+  if (!supportsEffort(settings.provider)) {
+    void vscode.window.showInformationMessage(`${label} não suporta escolha de effort.`);
+    return;
+  }
+  const known = EFFORT_LEVELS[settings.provider];
+  let levels = known;
+  if (settings.provider !== "claude") {
+    const current = (await modelOptions(settings.provider, catalogs)).find((model) => model.id === settings.model);
+    const supported = current?.efforts?.filter((effort) => known.includes(effort));
+    if (supported?.length) levels = supported;
+  }
+  const config = vscode.workspace.getConfiguration("cavemanCommit");
+  const override = config.get<string>("reasoningEffort", "");
+  const selected = await vscode.window.showQuickPick(
+    [
+      { label: "Padrão", description: [getDefaultEffort(settings.provider), override ? undefined : "Atual"].filter(Boolean).join(" · "), effort: "" },
+      ...levels.map((effort) => ({ label: effort, description: effort === override ? "Atual" : undefined, effort })),
+    ],
+    { title: `Caveman Commit · Effort (${label})`, placeHolder: "Escolha o reasoning effort" },
+  );
+  if (selected === undefined) {
+    return;
+  }
+  await config.update("reasoningEffort", selected.effort, configurationTarget());
   const updated = readSettings();
   statusBar.update(updated.provider, updated.model, updated.reasoningEffort, updated.diffScope);
 }
@@ -251,7 +328,7 @@ async function generateAndCopy(
       generate: async ({ settings, skill }, diff) => {
         const cwd = vscode.Uri.joinPath(context.globalStorageUri, "provider-workspace");
         await vscode.workspace.fs.createDirectory(cwd);
-        logger.log(`Provider: ${settings.provider}; modelo: ${settings.model}; effort: ${settings.reasoningEffort}; escopo: ${settings.diffScope}; diff: ${diffSizeInBytes(diff)} bytes.`);
+        logger.log(`Provider: ${settings.provider}; modelo: ${settings.model}; effort: ${settings.reasoningEffort ?? "n/a"}; escopo: ${settings.diffScope}; diff: ${diffSizeInBytes(diff)} bytes.`);
         return createMessage(providerFor(settings.provider, providers), settings, cwd.fsPath, skill, diff, statusBar, cancellation, logger);
       },
       confirmLargeDiff: async (repository, diff, { settings }) => {
@@ -323,7 +400,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const providers: Readonly<Record<ProviderId, CommitProvider>> = {
     codex: new CodexProvider({ run: runProcess, logger, resolveExecutable }),
     claude: new ClaudeProvider({ run: runProcess, logger, resolveExecutable }),
+    gemini: new GeminiProvider({ run: runProcess, logger, resolveExecutable }),
   };
+  const catalogFor = (list: typeof listCodexModels): ModelCatalog => async () => {
+    const cwd = vscode.Uri.joinPath(context.globalStorageUri, "provider-workspace");
+    await vscode.workspace.fs.createDirectory(cwd);
+    return list({ run: runProcess, logger, resolveExecutable }, cwd.fsPath);
+  };
+  const catalogs: ModelCatalogs = { codex: catalogFor(listCodexModels), gemini: catalogFor(listGeminiModels) };
 
   const refreshStatus = (): void => {
     try {
@@ -428,10 +512,13 @@ export function activate(context: vscode.ExtensionContext): void {
       selectProvider(statusBar),
     ),
     vscode.commands.registerCommand("cavemanCommit.selectModel", () =>
-      selectModel(statusBar),
+      selectModel(statusBar, catalogs),
+    ),
+    vscode.commands.registerCommand("cavemanCommit.selectEffort", () =>
+      selectEffort(statusBar, catalogs),
     ),
     vscode.commands.registerCommand("cavemanCommit.openSettings", () =>
-      vscode.commands.executeCommand("workbench.action.openSettings", "cavemanCommit"),
+      showSettingsPanel(context.extensionUri, (provider) => modelOptions(provider, catalogs)),
     ),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("cavemanCommit")) {

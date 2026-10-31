@@ -3,6 +3,8 @@ import * as vscode from "vscode";
 import { CavemanCommitError } from "../errors";
 import type { DiffScope } from "../git/gitClient";
 import {
+  EFFORT_LEVELS,
+  getEffectiveEffort,
   getEffectiveModel,
   isProviderId,
   type ProviderId,
@@ -12,7 +14,7 @@ export interface CavemanSettings {
   readonly diffScope: DiffScope;
   readonly provider: ProviderId;
   readonly model: string;
-  readonly reasoningEffort: "medium";
+  readonly reasoningEffort: string | undefined;
   readonly skillPath: string;
   readonly timeout: number;
   readonly maxDiffSize: number;
@@ -25,11 +27,11 @@ export function readSettings(): CavemanSettings {
     throw new CavemanCommitError("INVALID_PROVIDER", "Provider inválido.");
   }
 
-  const reasoningEffort = config.get<string>("reasoningEffort", "medium");
-  if (reasoningEffort !== "medium") {
+  const reasoningEffort = getEffectiveEffort(rawProvider, config.get<string>("reasoningEffort", ""));
+  if (reasoningEffort !== undefined && !EFFORT_LEVELS[rawProvider].includes(reasoningEffort)) {
     throw new CavemanCommitError(
       "INVALID_REASONING_EFFORT",
-      "Reasoning effort inválido. Use medium.",
+      `Reasoning effort inválido. Use ${EFFORT_LEVELS[rawProvider].join(", ")}.`,
     );
   }
 

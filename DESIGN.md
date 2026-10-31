@@ -54,3 +54,12 @@ em região `aria-live`. Falhas preservam textarea e painel. Atualização de um
 repositório no editor múltiplo não reconstrói os demais editores nem perde edições.
 Preencher Git ou copiar fecha a superfície individual; no editor múltiplo,
 confirma a ação no repositório correspondente e mantém o painel aberto.
+
+## Configurações
+
+Aba própria com a mesma topbar, coluna central e estilos (`surfaceStyles`) do
+painel da mensagem. Provider e escopo são grupos de opções em pill; modelo,
+effort e campos avançados usam a superfície neutra (raio 12 px). Modelos vêm do
+CLI instalado; o effort só oferece níveis suportados pelo modelo escolhido.
+Salvar é explícito (botão primário ou Ctrl/Cmd+Enter); Escape e Cancelar fecham
+sem gravar. Erros de validação marcam o campo, reabrem Avançado e mantêm a aba.

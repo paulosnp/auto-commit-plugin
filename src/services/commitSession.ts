@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { normalize } from "node:path";
 
+import { PROVIDER_LABELS } from "../config/models";
 import type { CavemanSettings } from "../config/settings";
 import { CavemanCommitError } from "../errors";
 import type { DiffScope } from "../git/gitClient";
@@ -110,7 +111,7 @@ export class CommitSession {
     return {
       repositoryName: repository.name, repositoryPath: repository.path, message,
       scope: settings.diffScope, diffHash, cacheKey,
-      provider: settings.provider === "codex" ? "Codex" : "Claude Code", model: settings.model,
+      provider: PROVIDER_LABELS[settings.provider], model: settings.model,
       stale, reused: cached !== undefined, copied: false, canUseGit,
     };
   }

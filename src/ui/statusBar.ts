@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 
-import { DEFAULT_MODELS, type ProviderId } from "../config/models";
+import { DEFAULT_MODELS, PROVIDER_LABELS, supportsEffort, type ProviderId } from "../config/models";
 
 const HOVER_COMMANDS = [
   "cavemanCommit.generateCommit",
   "cavemanCommit.selectProvider",
   "cavemanCommit.selectModel",
+  "cavemanCommit.selectEffort",
   "cavemanCommit.selectChanges",
   "cavemanCommit.openSettings",
   "cavemanCommit.loginClaude",
@@ -20,11 +21,10 @@ function escapeMarkdownCell(value: string): string {
 function buildTooltip(
   provider: ProviderId,
   model: string,
-  reasoningEffort: string,
+  reasoningEffort: string | undefined,
   processing: boolean,
   scope: "all" | "staged",
 ): vscode.MarkdownString {
-  const providerLabel = provider === "codex" ? "Codex" : "Claude Code";
   const tooltip = new vscode.MarkdownString(undefined, true);
   tooltip.isTrusted = { enabledCommands: HOVER_COMMANDS };
   tooltip.appendMarkdown("$(caveman-commit) **Caveman Commit**\n\n");
@@ -33,8 +33,8 @@ function buildTooltip(
       ? "Gerando mensagem… Clique para reiniciar.\n\n"
       : "Gerar e copiar mensagem de commit.\n\n",
   );
-  tooltip.appendMarkdown(`${escapeMarkdownCell(providerLabel)} · ${escapeMarkdownCell(model)}`);
-  if (provider === "codex") {
+  tooltip.appendMarkdown(`${escapeMarkdownCell(PROVIDER_LABELS[provider])} · ${escapeMarkdownCell(model)}`);
+  if (reasoningEffort !== undefined) {
     tooltip.appendMarkdown(
       ` · ${escapeMarkdownCell(reasoningEffort)}`,
     );
@@ -47,6 +47,7 @@ function buildTooltip(
   tooltip.appendMarkdown(
     "[Provider](command:cavemanCommit.selectProvider) · " +
       "[Modelo](command:cavemanCommit.selectModel) · " +
+      (supportsEffort(provider) ? "[Effort](command:cavemanCommit.selectEffort) · " : "") +
       "[Alterações](command:cavemanCommit.selectChanges)\n\n",
   );
   tooltip.appendMarkdown(
@@ -65,7 +66,7 @@ export class CavemanStatusBar implements vscode.Disposable {
   );
   private provider: ProviderId = "codex";
   private model: string = DEFAULT_MODELS.codex.id;
-  private reasoningEffort: string = DEFAULT_MODELS.codex.reasoningEffort;
+  private reasoningEffort: string | undefined = DEFAULT_MODELS.codex.reasoningEffort;
 
   private scope: "all" | "staged" = "all";
 
@@ -75,7 +76,7 @@ export class CavemanStatusBar implements vscode.Disposable {
     this.item.show();
   }
 
-  public update(provider: ProviderId, model: string, reasoningEffort: string, scope: "all" | "staged" = "all"): void {
+  public update(provider: ProviderId, model: string, reasoningEffort: string | undefined, scope: "all" | "staged" = "all"): void {
     this.scope = scope;
     this.provider = provider;
     this.model = model;

@@ -1,0 +1,9 @@
+{
+    "cavemanCommit.provider": "gemini",
+    "cavemanCommit.model": "",
+    "cavemanCommit.reasoningEffort": "",
+    "cavemanCommit.diffScope": "all",
+    "cavemanCommit.timeout": 120000,
+    "cavemanCommit.maxDiffSize": 500000,
+    "cavemanCommit.skillPath": "skills/caveman-commit/SKILL.md"
+}
